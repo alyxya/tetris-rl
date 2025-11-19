@@ -127,6 +127,7 @@ def evaluate_agent(agent, n_episodes=10):
         obs, _ = env.reset()
         done = False
         episode_reward = 0
+        episode_lines = 0
 
         while not done:
             action = agent.choose_action(obs[0], deterministic=True)
@@ -134,8 +135,12 @@ def evaluate_agent(agent, n_episodes=10):
             done = terminated[0] or truncated[0]
             episode_reward += reward[0]
 
+            # Track lines cleared (info is a list, one per env)
+            if isinstance(info, list) and len(info) > 0:
+                episode_lines = info[0].get('lines_cleared', 0) if isinstance(info[0], dict) else 0
+
         total_rewards.append(episode_reward)
-        total_lines.append(info.get('lines_cleared', [0])[0])
+        total_lines.append(episode_lines)
 
     env.close()
     return {
@@ -216,7 +221,7 @@ def save_checkpoint(model, optimizer, scheduler, iteration, epoch, best_metrics,
 
 def load_checkpoint(checkpoint_path, model, optimizer=None, scheduler=None, device='cpu'):
     """Load training checkpoint."""
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
 
     if optimizer and 'optimizer_state_dict' in checkpoint:
