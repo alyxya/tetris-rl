@@ -19,7 +19,7 @@ A learned agent using a convolutional neural network:
 
 ## Training Pipeline
 
-### Step 1: Supervised Learning (Imitation)
+### Option 1: Supervised Learning (Basic Imitation)
 
 Train CNN to imitate the heuristic agent:
 
@@ -40,16 +40,47 @@ This will:
 2. Train CNN to predict heuristic actions
 3. Save best model to `models/cnn_agent_best.pt`
 
-### Step 2: Reinforcement Learning (Fine-tuning)
+**Limitation**: Suffers from distribution shift - model sees expert states during training but its own states during deployment.
+
+### Option 2: Iterative Training (Recommended)
+
+Train CNN iteratively with expert feedback on agent's own trajectories:
+
+```bash
+python train_iterative.py --model models/cnn_agent_best.pt --iterations 10 --episodes 20 --epochs 5 --device cpu
+```
+
+Options:
+- `--model`: Path to pretrained model (optional, can start from scratch)
+- `--iterations`: Number of training iterations (default: 5)
+- `--episodes`: Episodes to collect per iteration (default: 20)
+- `--epochs`: Training epochs per iteration (default: 5)
+- `--batch-size`: Batch size (default: 128)
+- `--lr`: Learning rate (default: 1e-3)
+- `--device`: cpu or cuda (default: cpu)
+- `--initial-beta`: Starting beta (expert action probability, default: 1.0)
+- `--final-beta`: Final beta (expert action probability, default: 0.1)
+- `--val-split`: Validation split ratio (default: 0.2)
+
+This will:
+1. CNN acts in environment (collects its own trajectory distribution)
+2. Expert labels these states with correct actions
+3. CNN learns from aggregate dataset (grows each iteration)
+4. Beta decays: starts with expert guidance, transitions to CNN autonomy
+5. Saves best models: `cnn_agent_iterative_best.pt`, `cnn_agent_iterative_best_performance.pt`
+
+**Advantage**: Addresses distribution shift by training on states the agent actually encounters.
+
+### Option 3: Reinforcement Learning (Fine-tuning)
 
 Fine-tune CNN with policy gradient (REINFORCE):
 
 ```bash
-python train_rl.py --model models/cnn_agent_best.pt --episodes 1000 --device cpu
+python train_rl.py --model models/cnn_agent_iterative_best.pt --episodes 1000 --device cpu
 ```
 
 Options:
-- `--model`: Path to pretrained model (default: models/cnn_agent_best.pt)
+- `--model`: Path to pretrained model
 - `--episodes`: Number of training episodes (default: 1000)
 - `--temperature`: Sampling temperature (default: 1.0)
 - `--device`: cpu or cuda (default: cpu)
@@ -57,7 +88,7 @@ Options:
 - `--eval-interval`: Evaluate every N episodes (default: 50)
 
 This will:
-1. Load supervised pretrained model
+1. Load iterative pretrained model
 2. Fine-tune with REINFORCE algorithm
 3. Save checkpoints to `models/cnn_agent_rl_epN.pt`
 
