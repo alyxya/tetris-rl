@@ -31,7 +31,12 @@ class TetrisCNNPolicy(nn.Module):
         self.action_space = action_space
         self.grid_height = grid_height
         self.grid_width = grid_width
-        self.num_actions = action_space.nvec[0]  # Should be 7
+
+        # Handle both Discrete and MultiDiscrete action spaces
+        if hasattr(action_space, 'nvec'):
+            self.num_actions = action_space.nvec[0]  # MultiDiscrete
+        else:
+            self.num_actions = action_space.n  # Discrete
 
         # Build CNN layers (shared between both grid representations)
         self.conv_layers = nn.ModuleList()
