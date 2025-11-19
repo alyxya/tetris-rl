@@ -258,7 +258,10 @@ def train_rl(
     checkpoint_dir='checkpoints_rl',
     save_frequency=100,
     eval_frequency=50,
-    eval_episodes=10
+    eval_episodes=10,
+    line_clear_bonus=50.0,
+    credit_window=10,
+    credit_decay=0.7
 ):
     """
     Train model with reinforcement learning.
@@ -276,6 +279,9 @@ def train_rl(
         save_frequency: Save checkpoint every N episodes
         eval_frequency: Evaluate model every N episodes
         eval_episodes: Number of episodes for evaluation
+        line_clear_bonus: Bonus reward per line cleared (default: 50.0)
+        credit_window: Number of past actions to credit (default: 10)
+        credit_decay: Exponential decay for backward credit (default: 0.7)
     """
     device = torch.device(device)
 
@@ -333,6 +339,7 @@ def train_rl(
         done = False
         episode_reward = 0
         steps = 0
+        prev_lines_cleared = 0
 
         # Play episode
         model.train()
@@ -345,9 +352,29 @@ def train_rl(
             obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
 
+            # Check if lines were cleared
+            current_lines = 0
+            if isinstance(info, list) and len(info) > 0 and isinstance(info[0], dict):
+                current_lines = info[0].get('lines_cleared', 0)
+
+            lines_just_cleared = max(0, current_lines - prev_lines_cleared)
+            prev_lines_cleared = current_lines
+
+            # Apply reward shaping: bonus for line clears, propagated backwards
+            shaped_reward = reward[0]
+            if lines_just_cleared > 0:
+                # Give bonus to this action
+                shaped_reward += line_clear_bonus * lines_just_cleared
+
+                # Propagate credit backwards to recent actions with decay
+                num_recent = min(credit_window, len(trainer.rewards))
+                for i in range(1, num_recent + 1):
+                    bonus = line_clear_bonus * lines_just_cleared * (credit_decay ** i)
+                    trainer.rewards[-i] += bonus
+
             # Store reward
-            trainer.store_reward(reward[0])
-            episode_reward += reward[0]
+            trainer.store_reward(shaped_reward)
+            episode_reward += reward[0]  # Track original reward for logging
             steps += 1
 
         # Update policy
@@ -447,6 +474,14 @@ def main():
     parser.add_argument('--save-frequency', type=int, default=100,
                         help='Save checkpoint every N episodes')
 
+    # Reward shaping
+    parser.add_argument('--line-clear-bonus', type=float, default=50.0,
+                        help='Bonus reward per line cleared')
+    parser.add_argument('--credit-window', type=int, default=10,
+                        help='Number of past actions to credit for line clears')
+    parser.add_argument('--credit-decay', type=float, default=0.7,
+                        help='Decay factor for backward credit assignment')
+
     args = parser.parse_args()
 
     train_rl(
@@ -461,7 +496,10 @@ def main():
         checkpoint_dir=args.checkpoint_dir,
         save_frequency=args.save_frequency,
         eval_frequency=args.eval_frequency,
-        eval_episodes=args.eval_episodes
+        eval_episodes=args.eval_episodes,
+        line_clear_bonus=args.line_clear_bonus,
+        credit_window=args.credit_window,
+        credit_decay=args.credit_decay
     )
 
 
