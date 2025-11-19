@@ -184,8 +184,9 @@ class PPOTrainer:
 
     def store_transition(self, board_empty, board_filled, action, log_prob, value, reward, done):
         """Store transition in buffer."""
-        self.states_empty.append(board_empty.cpu().numpy())
-        self.states_filled.append(board_filled.cpu().numpy())
+        # Remove batch dimension before storing (boards are (1, 1, H, W), store as (1, H, W))
+        self.states_empty.append(board_empty.squeeze(0).cpu().numpy())
+        self.states_filled.append(board_filled.squeeze(0).cpu().numpy())
         self.actions.append(action)
         self.log_probs.append(log_prob)
         self.values.append(value)
@@ -366,21 +367,37 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, device='cpu'):
 
     # Handle different checkpoint formats
     if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-        if optimizer and 'optimizer_state_dict' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        return checkpoint
-    else:
-        # Try to load as TetrisCNN weights into ActorCritic
-        # Only load the CNN weights, not the actor/critic heads
-        try:
-            # Filter to only CNN layers
-            cnn_state = {k: v for k, v in checkpoint.items()
-                        if k.startswith(('conv', 'fc_shared'))}
+        state_dict = checkpoint['model_state_dict']
+
+        # Check if this is from supervised training (TetrisCNN) or PPO (ActorCritic)
+        if 'fc1.weight' in state_dict:
+            # This is TetrisCNN from supervised training
+            # Only load the CNN backbone (conv layers)
+            print("Loading CNN backbone from supervised checkpoint (TetrisCNN)")
+            cnn_state = {k: v for k, v in state_dict.items()
+                        if k.startswith('conv')}
             model.load_state_dict(cnn_state, strict=False)
-            print("Loaded CNN backbone from supervised model")
-        except:
-            print("Warning: Could not load pretrained weights")
+            print(f"Loaded {len(cnn_state)} CNN layers")
+            return {'episode': 0, 'best_reward': -float('inf')}
+        else:
+            # This is ActorCritic from PPO training - load everything
+            model.load_state_dict(state_dict)
+            if optimizer and 'optimizer_state_dict' in checkpoint:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            return checkpoint
+    else:
+        # Raw model weights (no checkpoint wrapper)
+        # Check if TetrisCNN or ActorCritic
+        if 'fc1.weight' in checkpoint:
+            # TetrisCNN weights - only load CNN
+            print("Loading CNN backbone from model weights (TetrisCNN)")
+            cnn_state = {k: v for k, v in checkpoint.items()
+                        if k.startswith('conv')}
+            model.load_state_dict(cnn_state, strict=False)
+            print(f"Loaded {len(cnn_state)} CNN layers")
+        else:
+            # ActorCritic weights - load everything
+            model.load_state_dict(checkpoint)
         return {'episode': 0, 'best_reward': -float('inf')}
 
 
@@ -443,17 +460,21 @@ def train_ppo(
     best_reward = -float('inf')
 
     # Load checkpoint or pretrained model
-    if checkpoint:
-        print(f"\nLoading PPO checkpoint: {checkpoint}")
-        ckpt = load_checkpoint(checkpoint, model, trainer.optimizer, device)
-        start_episode = ckpt.get('episode', 0) + 1
-        best_reward = ckpt.get('best_reward', -float('inf'))
-        print(f"Resuming from episode {start_episode}")
-        print(f"Best reward so far: {best_reward:.2f}")
-    elif model_path:
-        print(f"\nLoading pretrained model: {model_path}")
-        load_checkpoint(model_path, model, None, device)
-        print("Starting PPO training (CNN backbone initialized from supervised model)")
+    # Try to use --model first (can be checkpoint or weights), fallback to --checkpoint
+    load_path = checkpoint if checkpoint else model_path
+
+    if load_path:
+        print(f"\nLoading from: {load_path}")
+        ckpt = load_checkpoint(load_path, model, trainer.optimizer, device)
+
+        # Check if it's a resumable checkpoint (has episode info)
+        if 'episode' in ckpt and ckpt.get('episode', 0) > 0:
+            start_episode = ckpt['episode'] + 1
+            best_reward = ckpt.get('best_reward', -float('inf'))
+            print(f"Resuming from episode {start_episode}")
+            print(f"Best reward so far: {best_reward:.2f}")
+        else:
+            print("Starting PPO training (initialized from pretrained weights)")
     else:
         print("\nTraining from scratch")
 
