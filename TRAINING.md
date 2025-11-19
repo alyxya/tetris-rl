@@ -104,6 +104,110 @@ agent = CNNAgent(device='cpu', model_path='models/cnn_agent.pt')
 
 # Or load from checkpoint
 agent = CNNAgent(device='cpu')
-checkpoint = torch.load('checkpoints/best_performance.pt')
+checkpoint = torch.load('checkpoints/best_performance.pt', weights_only=False)
 agent.model.load_state_dict(checkpoint['model_state_dict'])
 ```
+
+---
+
+# Reinforcement Learning Fine-tuning
+
+After supervised training, you can fine-tune the model with pure RL (REINFORCE) to potentially surpass the teacher's performance.
+
+## Quick Start
+
+### Train from supervised model
+```bash
+python train_rl.py --model models/cnn_agent.pt --episodes 500
+```
+
+### Resume from RL checkpoint
+```bash
+python train_rl.py --checkpoint checkpoints_rl/checkpoint_rl_ep0200.pt --episodes 1000
+```
+
+## RL Training Process
+
+1. **Agent plays episode**: Uses current policy to play Tetris
+2. **Collects rewards**: Environment provides reward signal
+3. **Policy update**: REINFORCE updates policy to maximize expected rewards
+4. **No teacher**: Learns purely from game rewards, independent of heuristic
+
+## Arguments
+
+### Model Loading
+- `--model`: Path to pretrained model (from supervised training)
+- `--checkpoint`: Path to RL checkpoint to resume from
+- `--device`: Device to use (`cpu` or `cuda`, default: `cpu`)
+
+### Training Schedule
+- `--episodes`: Number of training episodes (default: `1000`)
+- `--eval-frequency`: Evaluate every N episodes (default: `50`)
+- `--eval-episodes`: Number of episodes for evaluation (default: `10`)
+
+### RL Hyperparameters
+- `--lr`: Learning rate (default: `1e-4`)
+- `--gamma`: Discount factor for returns (default: `0.99`)
+- `--entropy-coef`: Entropy regularization coefficient (default: `0.01`)
+- `--temperature`: Sampling temperature (default: `1.0`)
+
+### Checkpointing
+- `--checkpoint-dir`: Directory to save checkpoints (default: `checkpoints_rl`)
+- `--save-frequency`: Save checkpoint every N episodes (default: `100`)
+
+## Examples
+
+### Quick RL test (100 episodes)
+```bash
+python train_rl.py --model models/cnn_agent.pt --episodes 100 --save-frequency 50
+```
+
+### Long RL training with CUDA
+```bash
+python train_rl.py --model checkpoints/best_performance.pt --episodes 2000 --device cuda
+```
+
+### Resume RL training
+```bash
+python train_rl.py --checkpoint checkpoints_rl/checkpoint_rl_ep0500.pt --episodes 1000
+```
+
+### Adjust exploration (lower entropy = less random)
+```bash
+python train_rl.py --model models/cnn_agent.pt --episodes 500 --entropy-coef 0.005
+```
+
+## RL Checkpoints
+
+Checkpoints are saved to `checkpoints_rl/` directory:
+
+- `best_rl.pt`: Best evaluation reward model
+- `checkpoint_rl_epXXXX.pt`: Periodic episode checkpoints
+- `final_rl.pt`: Final training checkpoint
+
+Each checkpoint contains:
+- Model weights
+- Optimizer state
+- Episode number
+- Best reward achieved
+- Timestamp
+
+## Output
+
+The final RL-trained model is saved to `models/cnn_agent_rl.pt`.
+
+## Why RL After Supervised?
+
+**Supervised learning** teaches the agent to imitate the teacher, but it's limited by:
+- Teacher's skill ceiling
+- Distribution shift issues
+
+**RL fine-tuning** can:
+- Discover strategies the teacher doesn't use
+- Optimize directly for game rewards
+- Potentially surpass teacher performance
+
+However, RL is:
+- More sample-inefficient (needs many episodes)
+- Can be unstable (use pretrained model as starting point)
+- Benefits greatly from good initialization (supervised pretraining)
