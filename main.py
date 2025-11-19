@@ -3,11 +3,12 @@ Main script for running Tetris agents.
 
 Usage:
     python main.py --agent heuristic [--episodes 1] [--render]
+    python main.py --agent hybrid --model-path models/best_model.pt [--episodes 1] [--render]
 """
 
 import argparse
 from pufferlib.ocean.tetris import tetris
-from agents import HeuristicAgent, CNNAgent
+from agents import HeuristicAgent, CNNAgent, HybridAgent
 
 
 def run_episode(env, agent, render=False, verbose=True):
@@ -52,7 +53,7 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Run Tetris agents')
     parser.add_argument('--agent', type=str, default='heuristic',
-                        choices=['heuristic', 'cnn'],
+                        choices=['heuristic', 'cnn', 'hybrid'],
                         help='Agent type to use')
     parser.add_argument('--model-path', type=str, default=None,
                         help='Path to CNN model weights (for cnn agent)')
@@ -80,6 +81,14 @@ def main():
             print(f"Loaded model from {args.model_path}")
         else:
             print("Using randomly initialized model")
+    elif args.agent == 'hybrid':
+        agent = HybridAgent(model_path=args.model_path)
+        print(f"Running HybridAgent for {args.episodes} episode(s)...")
+        print("The agent randomly chooses between CNN and Heuristic with 50/50 probability.")
+        if args.model_path:
+            print(f"Loaded CNN model from {args.model_path}")
+        else:
+            print("Using randomly initialized CNN model")
     else:
         raise ValueError(f"Unknown agent: {args.agent}")
 
@@ -97,6 +106,12 @@ def main():
         all_rewards.append(reward)
 
         print(f"Episode {episode + 1} finished: {steps} steps, reward: {reward:.2f}")
+
+        # Print usage stats for hybrid agent
+        if args.agent == 'hybrid':
+            stats = agent.get_usage_stats()
+            print(f"  CNN used: {stats['cnn_count']} times ({stats['cnn_percentage']:.1f}%)")
+            print(f"  Heuristic used: {stats['heuristic_count']} times ({stats['heuristic_percentage']:.1f}%)")
 
     # Print summary
     if args.episodes > 1:

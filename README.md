@@ -17,6 +17,12 @@ A learned agent using a convolutional neural network:
 - Shared CNN backbone with MLP head
 - Can be trained via supervised learning (imitation) then fine-tuned with RL
 
+### 3. Hybrid Agent
+A hybrid agent that combines both CNN and heuristic approaches:
+- Randomly chooses between CNN and heuristic policies with 50/50 probability
+- Useful for exploring hybrid strategies and comparing agent behaviors
+- Tracks usage statistics to show how often each policy is selected
+
 ## Training
 
 Train the CNN agent using on-policy data collection with teacher supervision:
@@ -83,10 +89,22 @@ python main.py --agent cnn --episodes 3
 python main.py --agent cnn --model-path models/cnn_agent_best.pt --episodes 3
 ```
 
+### Hybrid Agent
+
+```bash
+# With random CNN initialization
+python main.py --agent hybrid --episodes 3
+
+# With trained CNN model
+python main.py --agent hybrid --model-path models/cnn_agent_best.pt --episodes 3
+```
+
+The hybrid agent will display usage statistics showing how many times each policy (CNN vs Heuristic) was selected.
+
 Options:
-- `--agent`: Agent type (heuristic or cnn)
+- `--agent`: Agent type (heuristic, cnn, or hybrid)
 - `--episodes`: Number of episodes to run
-- `--model-path`: Path to CNN model weights (for cnn agent)
+- `--model-path`: Path to CNN model weights (for cnn or hybrid agent)
 - `--render`: Render the game (warning: slow)
 
 ## CNN Architecture
@@ -137,7 +155,8 @@ tetris-rl/
 ├── agents/
 │   ├── __init__.py
 │   ├── heuristic_agent.py    # Rule-based agent
-│   └── cnn_agent.py           # CNN-based agent
+│   ├── cnn_agent.py           # CNN-based agent
+│   └── hybrid_agent.py        # Hybrid CNN/heuristic agent
 ├── models/                    # Saved model checkpoints
 ├── checkpoints/               # Training checkpoints
 ├── archive/                   # Old training scripts
