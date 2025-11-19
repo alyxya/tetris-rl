@@ -30,14 +30,13 @@ from base_agent import BaseTetrisAgent
 class HeuristicAgent(BaseTetrisAgent):
     """Heuristic agent that evaluates placements with rotation."""
 
-    def __init__(self, n_rows=20, n_cols=10, use_rotation=True):
+    def __init__(self, n_rows=20, n_cols=10):
         """
         Initialize heuristic agent.
 
         Args:
             n_rows: Number of rows in board
             n_cols: Number of columns in board
-            use_rotation: Whether to consider rotations (default True)
         """
         super().__init__(n_rows, n_cols)
 
@@ -48,9 +47,6 @@ class HeuristicAgent(BaseTetrisAgent):
             'holes': -0.36,
             'bumpiness': -0.18,
         }
-
-        # Configuration
-        self.use_rotation = use_rotation
 
         # State tracking
         self.target_column = None
@@ -194,11 +190,10 @@ class HeuristicAgent(BaseTetrisAgent):
         best_score = float('-inf')
         best_lines_cleared = 0
 
-        # Try each rotation
-        num_rotations = 4 if self.use_rotation else 1
+        # Try all 4 rotations
         current_shape = piece_shape.copy()
 
-        for rotation in range(num_rotations):
+        for rotation in range(4):
             piece_width = current_shape.shape[1]
 
             # Try each possible column for this rotation
@@ -268,7 +263,7 @@ class HeuristicAgent(BaseTetrisAgent):
                 return 4
 
         # Step 1: Rotate to target orientation first
-        if self.use_rotation and self.current_rotations < self.target_rotation:
+        if self.current_rotations < self.target_rotation:
             self.current_rotations += 1
             return 3  # Rotate clockwise
 

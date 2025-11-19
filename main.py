@@ -60,8 +60,6 @@ def main():
                         help='Render the game (warning: slow)')
     parser.add_argument('--verbose', action='store_true', default=True,
                         help='Print progress during episodes')
-    parser.add_argument('--no-rotation', action='store_true',
-                        help='Disable rotation consideration for heuristic agent')
 
     args = parser.parse_args()
 
@@ -70,13 +68,9 @@ def main():
 
     # Create agent
     if args.agent == 'heuristic':
-        use_rotation = not args.no_rotation
-        agent = HeuristicAgent(use_rotation=use_rotation)
+        agent = HeuristicAgent()
         print(f"Running HeuristicAgent for {args.episodes} episode(s)...")
-        if use_rotation:
-            print("The agent evaluates all rotations and horizontal placements.")
-        else:
-            print("The agent evaluates horizontal placements (no rotation).")
+        print("The agent evaluates all rotations and horizontal placements.")
     else:
         raise ValueError(f"Unknown agent: {args.agent}")
 
