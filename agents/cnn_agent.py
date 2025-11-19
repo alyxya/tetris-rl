@@ -200,5 +200,12 @@ class CNNAgent(BaseTetrisAgent):
 
     def load_model(self, path):
         """Load model weights."""
-        self.model.load_state_dict(torch.load(path, map_location=self.device))
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+
+        # Handle both full checkpoints and model-only weights
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            self.model.load_state_dict(checkpoint)
+
         print(f"Model loaded from {path}")
