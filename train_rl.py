@@ -327,6 +327,7 @@ def train_rl(
 
     # Track metrics
     episode_rewards = deque(maxlen=100)
+    episode_shaped_rewards = deque(maxlen=100)
     episode_lengths = deque(maxlen=100)
     episode_losses = deque(maxlen=100)
 
@@ -338,6 +339,7 @@ def train_rl(
 
         done = False
         episode_reward = 0
+        episode_shaped_reward = 0
         steps = 0
         prev_lines_cleared = 0
 
@@ -375,22 +377,26 @@ def train_rl(
             # Store reward
             trainer.store_reward(shaped_reward)
             episode_reward += reward[0]  # Track original reward for logging
+            episode_shaped_reward += shaped_reward  # Track shaped reward for logging
             steps += 1
 
         # Update policy
         loss = trainer.update()
 
         episode_rewards.append(episode_reward)
+        episode_shaped_rewards.append(episode_shaped_reward)
         episode_lengths.append(steps)
         episode_losses.append(loss)
 
         # Logging
         if (episode + 1) % 10 == 0:
             avg_reward = np.mean(episode_rewards)
+            avg_shaped_reward = np.mean(episode_shaped_rewards)
             avg_length = np.mean(episode_lengths)
             avg_loss = np.mean(episode_losses)
             print(f"Episode {episode+1}/{n_episodes}: "
-                  f"Reward: {avg_reward:.2f}, Length: {avg_length:.0f}, Loss: {avg_loss:.4f}")
+                  f"Reward: {avg_reward:.2f} (Shaped: {avg_shaped_reward:.2f}), "
+                  f"Length: {avg_length:.0f}, Loss: {avg_loss:.4f}")
 
         # Evaluation
         if (episode + 1) % eval_frequency == 0:
