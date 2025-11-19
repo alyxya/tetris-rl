@@ -1,12 +1,12 @@
 """
-Simple heuristic-based Tetris agent (no rotation version).
+Heuristic-based Tetris agent with rotation support.
 
 The agent:
 1. Extracts the current piece from the board (cells with value 2)
-2. For each horizontal position, simulates dropping the piece straight down
+2. For each rotation (0-3) and horizontal position, simulates dropping the piece
 3. Prioritizes moves that clear lines (most lines = best)
 4. If tied or no lines, uses heuristics: minimize height, holes, bumpiness
-5. Moves to target position and drops
+5. Rotates piece to target rotation, moves to target column, then drops
 
 Actions (verified empirically):
 0 = no-op (piece doesn't move)
@@ -19,14 +19,27 @@ Actions (verified empirically):
 """
 
 import numpy as np
-from pufferlib.ocean.tetris import tetris
+import sys
+import os
+
+# Add parent directory to path to import base_agent
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from base_agent import BaseTetrisAgent
 
 
-class HeuristicAgent:
-    def __init__(self, n_rows=20, n_cols=10):
-        """Initialize heuristic agent."""
-        self.n_rows = n_rows
-        self.n_cols = n_cols
+class HeuristicAgent(BaseTetrisAgent):
+    """Heuristic agent that evaluates placements with rotation."""
+
+    def __init__(self, n_rows=20, n_cols=10, use_rotation=True):
+        """
+        Initialize heuristic agent.
+
+        Args:
+            n_rows: Number of rows in board
+            n_cols: Number of columns in board
+            use_rotation: Whether to consider rotations (default True)
+        """
+        super().__init__(n_rows, n_cols)
 
         # Heuristic weights (for when no lines are cleared)
         self.weights = {
@@ -36,21 +49,19 @@ class HeuristicAgent:
             'bumpiness': -0.18,
         }
 
+        # Configuration
+        self.use_rotation = use_rotation
+
         # State tracking
         self.target_column = None
-        self.ready_to_drop = False
+        self.target_rotation = None  # 0-3 (number of CW rotations from current)
+        self.current_rotations = 0   # Track how many rotations we've done
 
-    def parse_observation(self, obs):
-        """Parse observation into board parts."""
-        # Board: first n_rows * n_cols values
-        # Values: 0 = empty, 1 = locked block, 2 = active piece
-        full_board = obs[0:self.n_rows * self.n_cols].reshape(self.n_rows, self.n_cols)
-
-        # Separate locked blocks and active piece
-        locked_board = (full_board == 1).astype(float)
-        active_piece = (full_board == 2).astype(float)
-
-        return full_board, locked_board, active_piece
+    def reset(self):
+        """Reset agent state for new episode."""
+        self.target_column = None
+        self.target_rotation = None
+        self.current_rotations = 0
 
     def extract_piece_info(self, active_piece):
         """
@@ -78,42 +89,18 @@ class HeuristicAgent:
 
         return piece_positions, piece_cols, piece_shape
 
-    def get_column_heights(self, board):
-        """Get the height of each column (counting from bottom)."""
-        heights = np.zeros(self.n_cols)
-        for col in range(self.n_cols):
-            for row in range(self.n_rows):
-                if board[row, col] > 0:
-                    heights[col] = self.n_rows - row
-                    break
-        return heights
+    def rotate_piece_cw(self, piece_shape):
+        """
+        Rotate piece shape 90 degrees clockwise.
 
-    def count_holes(self, board):
-        """Count holes (empty cells with filled cells above them)."""
-        holes = 0
-        for col in range(self.n_cols):
-            found_block = False
-            for row in range(self.n_rows):
-                if board[row, col] > 0:
-                    found_block = True
-                elif found_block and board[row, col] == 0:
-                    holes += 1
-        return holes
+        Args:
+            piece_shape: 2D array representing piece
 
-    def count_complete_lines(self, board):
-        """Count number of complete lines that would be cleared."""
-        complete_lines = 0
-        for row in range(self.n_rows):
-            if np.all(board[row, :] > 0):
-                complete_lines += 1
-        return complete_lines
-
-    def calculate_bumpiness(self, heights):
-        """Calculate bumpiness (sum of height differences between adjacent columns)."""
-        bumpiness = 0
-        for i in range(len(heights) - 1):
-            bumpiness += abs(heights[i] - heights[i + 1])
-        return bumpiness
+        Returns:
+            rotated_shape: piece rotated 90 degrees clockwise
+        """
+        # Rotate 90 degrees clockwise = transpose then flip horizontally
+        return np.flip(piece_shape.T, axis=1)
 
     def simulate_drop(self, locked_board, piece_shape, target_col):
         """
@@ -190,46 +177,58 @@ class HeuristicAgent:
 
         return score
 
-    def find_best_drop_column(self, locked_board, piece_shape, current_piece_cols):
+    def find_best_placement(self, locked_board, piece_shape):
         """
-        Find the best column to drop the piece.
+        Find the best rotation and column to drop the piece.
 
         Returns:
+            best_rotation: number of CW rotations from current (0-3)
             best_col: best column to place piece's left edge
             best_score: evaluation score
         """
         if piece_shape is None:
-            return None, float('-inf')
+            return 0, None, float('-inf')
 
-        piece_width = piece_shape.shape[1]
-
+        best_rotation = 0
         best_col = None
         best_score = float('-inf')
         best_lines_cleared = 0
 
-        # Try each possible column
-        for col in range(self.n_cols - piece_width + 1):
-            new_board, lines_cleared = self.simulate_drop(locked_board, piece_shape, col)
+        # Try each rotation
+        num_rotations = 4 if self.use_rotation else 1
+        current_shape = piece_shape.copy()
 
-            if new_board is None:
-                continue
+        for rotation in range(num_rotations):
+            piece_width = current_shape.shape[1]
 
-            # Prioritize line clears
-            if lines_cleared > best_lines_cleared:
-                best_lines_cleared = lines_cleared
-                best_col = col
-                best_score = lines_cleared * 1000  # High priority
-            elif lines_cleared == best_lines_cleared:
-                # Use heuristic for ties
-                score = self.evaluate_board(new_board)
-                if lines_cleared > 0:
-                    score += lines_cleared * 1000
+            # Try each possible column for this rotation
+            for col in range(self.n_cols - piece_width + 1):
+                new_board, lines_cleared = self.simulate_drop(locked_board, current_shape, col)
 
-                if score > best_score:
-                    best_score = score
+                if new_board is None:
+                    continue
+
+                # Prioritize line clears
+                if lines_cleared > best_lines_cleared:
+                    best_lines_cleared = lines_cleared
+                    best_rotation = rotation
                     best_col = col
+                    best_score = lines_cleared * 1000  # High priority
+                elif lines_cleared == best_lines_cleared:
+                    # Use heuristic for ties
+                    score = self.evaluate_board(new_board)
+                    if lines_cleared > 0:
+                        score += lines_cleared * 1000
 
-        return best_col, best_score
+                    if score > best_score:
+                        best_score = score
+                        best_rotation = rotation
+                        best_col = col
+
+            # Rotate for next iteration
+            current_shape = self.rotate_piece_cw(current_shape)
+
+        return best_rotation, best_col, best_score
 
     def choose_action(self, obs):
         """
@@ -249,73 +248,38 @@ class HeuristicAgent:
         # Extract current piece info
         piece_positions, piece_cols, piece_shape = self.extract_piece_info(active_piece)
 
-        # If no piece visible, no-op
+        # If no piece visible, no-op and reset state
         if piece_shape is None:
             self.target_column = None
-            self.ready_to_drop = False
+            self.target_rotation = None
+            self.current_rotations = 0
             return 0
 
         # Get current piece leftmost column
         current_left_col = piece_cols.min()
 
-        # If we don't have a target, find the best one
-        if self.target_column is None:
-            self.target_column, _ = self.find_best_drop_column(locked_board, piece_shape, piece_cols)
-            self.ready_to_drop = False
+        # If we don't have a target, find the best placement
+        if self.target_column is None or self.target_rotation is None:
+            self.target_rotation, self.target_column, _ = self.find_best_placement(locked_board, piece_shape)
+            self.current_rotations = 0
 
             if self.target_column is None:
                 # No valid placement found, just drop
                 return 4
 
-        # Move towards target column
+        # Step 1: Rotate to target orientation first
+        if self.use_rotation and self.current_rotations < self.target_rotation:
+            self.current_rotations += 1
+            return 3  # Rotate clockwise
+
+        # Step 2: Move to target column
         if current_left_col > self.target_column:
             return 1  # Move left
         elif current_left_col < self.target_column:
             return 2  # Move right
         else:
-            # We're in position, drop!
+            # Step 3: We're in position, drop!
             self.target_column = None
-            self.ready_to_drop = False
+            self.target_rotation = None
+            self.current_rotations = 0
             return 4  # Soft drop (let it fall)
-
-
-def main():
-    """Demo the heuristic agent."""
-    env = tetris.Tetris()
-    agent = HeuristicAgent()
-
-    obs, info = env.reset()
-    done = False
-    total_reward = 0
-    steps = 0
-    pieces_placed = 0
-
-    print("Running heuristic agent (no rotation)...")
-    print("The agent evaluates horizontal placements and chooses the best one.")
-
-    while not done:
-        action = agent.choose_action(obs[0])
-        obs, reward, terminated, truncated, info = env.step([action])
-
-        # frame = env.render()
-
-        # Uncomment to see the board
-        # if steps % 10 == 0:
-        #     board = obs[0, :200].reshape(20, 10).astype(int)
-        #     print(f"\nStep {steps}:")
-        #     print(board)
-
-        total_reward += reward[0]
-        steps += 1
-        done = terminated[0] or truncated[0]
-
-        if steps % 100 == 0:
-            print(f"Step {steps}, Total reward: {total_reward:.2f}")
-
-    print(f"\nEpisode finished after {steps} steps")
-    print(f"Total reward: {total_reward:.2f}")
-    env.close()
-
-
-if __name__ == "__main__":
-    main()
