@@ -262,9 +262,7 @@ def train_rl(
     line_clear_bonus=50.0,
     credit_window=10,
     credit_decay=0.7,
-    death_penalty=30.0,
-    death_penalty_window=5,
-    normalize_rewards=True
+    normalize_rewards=False
 ):
     """
     Train model with reinforcement learning.
@@ -285,9 +283,7 @@ def train_rl(
         line_clear_bonus: Bonus reward per line cleared (default: 50.0)
         credit_window: Number of past actions to credit (default: 10)
         credit_decay: Exponential decay for backward credit (default: 0.7)
-        death_penalty: Penalty for actions leading to death (default: 30.0)
-        death_penalty_window: Number of actions before death to penalize (default: 5)
-        normalize_rewards: Normalize rewards for training stability (default: True)
+        normalize_rewards: Normalize rewards for training stability (default: False)
     """
     device = torch.device(device)
 
@@ -385,13 +381,6 @@ def train_rl(
             episode_reward += reward[0]  # Track original reward for logging
             episode_shaped_reward += shaped_reward  # Track shaped reward for logging
             steps += 1
-
-        # Apply death penalty if game ended (not truncated)
-        if done and terminated[0]:
-            num_penalize = min(death_penalty_window, len(trainer.rewards))
-            for i in range(num_penalize):
-                penalty = death_penalty * (credit_decay ** i)
-                trainer.rewards[-(i+1)] -= penalty
 
         # Normalize rewards for stability
         if normalize_rewards and len(trainer.rewards) > 1:
@@ -508,12 +497,8 @@ def main():
                         help='Number of past actions to credit for line clears')
     parser.add_argument('--credit-decay', type=float, default=0.7,
                         help='Decay factor for backward credit assignment')
-    parser.add_argument('--death-penalty', type=float, default=30.0,
-                        help='Penalty for actions leading to game over')
-    parser.add_argument('--death-penalty-window', type=int, default=5,
-                        help='Number of actions before death to penalize')
-    parser.add_argument('--no-normalize-rewards', action='store_true',
-                        help='Disable reward normalization')
+    parser.add_argument('--normalize-rewards', action='store_true',
+                        help='Enable reward normalization (may flatten shaping)')
 
     args = parser.parse_args()
 
@@ -533,9 +518,7 @@ def main():
         line_clear_bonus=args.line_clear_bonus,
         credit_window=args.credit_window,
         credit_decay=args.credit_decay,
-        death_penalty=args.death_penalty,
-        death_penalty_window=args.death_penalty_window,
-        normalize_rewards=not args.no_normalize_rewards
+        normalize_rewards=args.normalize_rewards
     )
 
 
