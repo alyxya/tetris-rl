@@ -17,80 +17,53 @@ A learned agent using a convolutional neural network:
 - Shared CNN backbone with MLP head
 - Can be trained via supervised learning (imitation) then fine-tuned with RL
 
-## Training Pipeline
+## Training
 
-### Option 1: Supervised Learning (Basic Imitation)
-
-Train CNN to imitate the heuristic agent:
+Train the CNN agent using on-policy data collection with teacher supervision:
 
 ```bash
-python train_supervised.py --episodes 100 --epochs 20 --batch-size 128 --device cpu
+# Train from scratch (default settings)
+python train.py
+
+# Quick test run
+python train.py --iterations 3 --episodes 10 --epochs 5
+
+# Full training with CUDA
+python train.py --iterations 20 --episodes 50 --epochs 15 --device cuda
+
+# Resume from checkpoint
+python train.py --checkpoint checkpoints/checkpoint_iter005.pt
 ```
 
-Options:
-- `--episodes`: Number of episodes to collect from expert (default: 100)
-- `--epochs`: Number of training epochs (default: 20)
-- `--batch-size`: Batch size (default: 128)
-- `--lr`: Learning rate (default: 1e-3)
-- `--device`: cpu or cuda (default: cpu)
-- `--val-split`: Validation split ratio (default: 0.2)
+### How It Works
 
-This will:
-1. Collect ~400k state-action pairs from heuristic agent
-2. Train CNN to predict heuristic actions
-3. Save best model to `models/cnn_agent_best.pt`
+The training addresses **distribution shift** by having the student (CNN) collect its own data:
 
-**Limitation**: Suffers from distribution shift - model sees expert states during training but its own states during deployment.
+1. **Data Collection**: Student agent plays episodes while teacher (heuristic agent) labels the states
+2. **Training**: CNN trains on aggregate dataset for several epochs
+3. **Evaluation**: Agent performance measured in actual gameplay
+4. **Checkpointing**: Regular checkpoints saved for resuming training
 
-### Option 2: Iterative Training (Recommended)
+The exploration probability (how often the teacher action is taken) decays from 0.9 to 0.1, allowing the student to gradually take control.
 
-Train CNN iteratively with expert feedback on agent's own trajectories:
+### Key Arguments
 
-```bash
-python train_iterative.py --model models/cnn_agent_best.pt --iterations 10 --episodes 20 --epochs 5 --device cpu
-```
+- `--teacher`: Teacher agent type (default: `heuristic`)
+- `--checkpoint`: Resume from checkpoint file
+- `--iterations`: Number of data collection iterations (default: `10`)
+- `--episodes`: Episodes per iteration (default: `20`)
+- `--epochs`: Training epochs per iteration (default: `10`)
+- `--device`: `cpu` or `cuda` (default: `cpu`)
+- `--save-frequency`: Save checkpoint every N iterations (default: `1`)
 
-Options:
-- `--model`: Path to pretrained model (optional, can start from scratch)
-- `--iterations`: Number of training iterations (default: 5)
-- `--episodes`: Episodes to collect per iteration (default: 20)
-- `--epochs`: Training epochs per iteration (default: 5)
-- `--batch-size`: Batch size (default: 128)
-- `--lr`: Learning rate (default: 1e-3)
-- `--device`: cpu or cuda (default: cpu)
-- `--initial-beta`: Starting beta (expert action probability, default: 1.0)
-- `--final-beta`: Final beta (expert action probability, default: 0.1)
-- `--val-split`: Validation split ratio (default: 0.2)
+See [TRAINING.md](TRAINING.md) for full documentation.
 
-This will:
-1. CNN acts in environment (collects its own trajectory distribution)
-2. Expert labels these states with correct actions
-3. CNN learns from aggregate dataset (grows each iteration)
-4. Beta decays: starts with expert guidance, transitions to CNN autonomy
-5. Saves best models: `cnn_agent_iterative_best.pt`, `cnn_agent_iterative_best_performance.pt`
+### Outputs
 
-**Advantage**: Addresses distribution shift by training on states the agent actually encounters.
-
-### Option 3: Reinforcement Learning (Fine-tuning)
-
-Fine-tune CNN with policy gradient (REINFORCE):
-
-```bash
-python train_rl.py --model models/cnn_agent_iterative_best.pt --episodes 1000 --device cpu
-```
-
-Options:
-- `--model`: Path to pretrained model
-- `--episodes`: Number of training episodes (default: 1000)
-- `--temperature`: Sampling temperature (default: 1.0)
-- `--device`: cpu or cuda (default: cpu)
-- `--save-interval`: Save every N episodes (default: 100)
-- `--eval-interval`: Evaluate every N episodes (default: 50)
-
-This will:
-1. Load iterative pretrained model
-2. Fine-tune with REINFORCE algorithm
-3. Save checkpoints to `models/cnn_agent_rl_epN.pt`
+- `checkpoints/best_val.pt`: Best validation accuracy model
+- `checkpoints/best_performance.pt`: Best evaluation reward model
+- `checkpoints/checkpoint_iterXXX.pt`: Periodic iteration checkpoints
+- `models/cnn_agent.pt`: Final trained model (weights only)
 
 ## Running Agents
 
@@ -166,10 +139,13 @@ tetris-rl/
 │   ├── heuristic_agent.py    # Rule-based agent
 │   └── cnn_agent.py           # CNN-based agent
 ├── models/                    # Saved model checkpoints
+├── checkpoints/               # Training checkpoints
+├── archive/                   # Old training scripts
+├── models_archive/            # Old model files
 ├── base_agent.py              # Base agent class
 ├── main.py                    # Run agents
-├── train_supervised.py        # Supervised learning
-├── train_rl.py               # RL training
+├── train.py                   # Training script
+├── TRAINING.md                # Training documentation
 └── README.md
 ```
 
