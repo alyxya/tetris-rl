@@ -460,21 +460,17 @@ def train_ppo(
     best_reward = -float('inf')
 
     # Load checkpoint or pretrained model
-    # Try to use --model first (can be checkpoint or weights), fallback to --checkpoint
-    load_path = checkpoint if checkpoint else model_path
-
-    if load_path:
-        print(f"\nLoading from: {load_path}")
-        ckpt = load_checkpoint(load_path, model, trainer.optimizer, device)
-
-        # Check if it's a resumable checkpoint (has episode info)
-        if 'episode' in ckpt and ckpt.get('episode', 0) > 0:
-            start_episode = ckpt['episode'] + 1
-            best_reward = ckpt.get('best_reward', -float('inf'))
-            print(f"Resuming from episode {start_episode}")
-            print(f"Best reward so far: {best_reward:.2f}")
-        else:
-            print("Starting PPO training (initialized from pretrained weights)")
+    if checkpoint:
+        print(f"\nLoading PPO checkpoint: {checkpoint}")
+        ckpt = load_checkpoint(checkpoint, model, trainer.optimizer, device)
+        start_episode = ckpt.get('episode', 0) + 1
+        best_reward = ckpt.get('best_reward', -float('inf'))
+        print(f"Resuming from episode {start_episode}")
+        print(f"Best reward so far: {best_reward:.2f}")
+    elif model_path:
+        print(f"\nLoading pretrained model: {model_path}")
+        load_checkpoint(model_path, model, None, device)
+        print("Starting PPO training from pretrained model")
     else:
         print("\nTraining from scratch")
 
