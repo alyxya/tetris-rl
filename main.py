@@ -7,7 +7,7 @@ Usage:
 
 import argparse
 from pufferlib.ocean.tetris import tetris
-from agents import HeuristicAgent
+from agents import HeuristicAgent, CNNAgent
 
 
 def run_episode(env, agent, render=False, verbose=True):
@@ -52,8 +52,10 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Run Tetris agents')
     parser.add_argument('--agent', type=str, default='heuristic',
-                        choices=['heuristic'],
+                        choices=['heuristic', 'cnn'],
                         help='Agent type to use')
+    parser.add_argument('--model-path', type=str, default=None,
+                        help='Path to CNN model weights (for cnn agent)')
     parser.add_argument('--episodes', type=int, default=1,
                         help='Number of episodes to run')
     parser.add_argument('--render', action='store_true',
@@ -71,6 +73,13 @@ def main():
         agent = HeuristicAgent()
         print(f"Running HeuristicAgent for {args.episodes} episode(s)...")
         print("The agent evaluates all rotations and horizontal placements.")
+    elif args.agent == 'cnn':
+        agent = CNNAgent(model_path=args.model_path)
+        print(f"Running CNNAgent for {args.episodes} episode(s)...")
+        if args.model_path:
+            print(f"Loaded model from {args.model_path}")
+        else:
+            print("Using randomly initialized model")
     else:
         raise ValueError(f"Unknown agent: {args.agent}")
 
