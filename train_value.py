@@ -82,6 +82,12 @@ def collect_data(teacher_agent, student_agent=None, n_episodes=10, student_mix=0
         - 1 - student_mix - random_mix: use teacher agent
 
         Teacher's action is always used as the label for learning.
+
+        Rewards are based on lines cleared only (no drop rewards):
+        - 1 line: 0.1
+        - 2 lines: 0.3
+        - 3 lines: 0.5
+        - 4 lines: 1.0
     """
     env = tetris.Tetris()
 
@@ -95,6 +101,7 @@ def collect_data(teacher_agent, student_agent=None, n_episodes=10, student_mix=0
         teacher_mix = 1.0 - student_mix - random_mix
         print(f"Collecting data from {n_episodes} episodes (gamma={gamma})...")
         print(f"  Action mix: teacher={teacher_mix:.2f}, student={student_mix:.2f}, random={random_mix:.2f}")
+        print(f"  Reward scheme: 1 line=0.1, 2 lines=0.3, 3 lines=0.5, 4 lines=1.0")
 
     for episode in tqdm(range(n_episodes), disable=not verbose):
         obs, _ = env.reset()
@@ -142,9 +149,17 @@ def collect_data(teacher_agent, student_agent=None, n_episodes=10, student_mix=0
             # Step environment with chosen action
             obs, reward, terminated, truncated, info = env.step([action_to_execute])
             done = terminated[0] or truncated[0]
-            step_reward = reward[0]
-            episode_reward += step_reward
 
+            # Extract reward from line clears only (ignore drop rewards)
+            # Env rewards: drop=0.01, lines={0.1, 0.3, 0.5, 1.0}, combined=drop+lines
+            # Map to line clear rewards: {0.1, 0.3, 0.5, 1.0} or 0.0
+            step_reward = round(reward[0], 2)
+            if step_reward >= 0.09:  # Has line clear component
+                step_reward = round(step_reward / 0.1) * 0.1  # Remove drop, round to {0.1, 0.3, 0.5, 1.0}
+            else:  # Just drop or nothing
+                step_reward = 0.0
+
+            episode_reward += step_reward
             episode_step_rewards.append(step_reward)
 
         episode_rewards.append(episode_reward)
