@@ -56,7 +56,7 @@ def collect_data(
     n_episodes=10,
     random_prob=0.1,
     discount=0.99,
-    penalty_growth=1.2,
+    penalty_growth=1.1,
     penalty_per_move=0.01,
     verbose=True,
 ):
@@ -68,7 +68,7 @@ def collect_data(
         n_episodes: Number of episodes to collect
         random_prob: Probability of forcing a random action for extra coverage
         discount: Discount factor used for line-clear return targets (default: 0.99)
-        penalty_growth: Growth factor for penalty returns (default: 1.2)
+        penalty_growth: Growth factor for penalty returns (default: 1.1)
         penalty_per_move: Penalty value for left/right/rotate actions (default: 0.01)
         verbose: Print progress
 
@@ -352,7 +352,7 @@ def train(
     val_split=0.2,
     random_action_prob=0.1,
     discount=0.99,
-    penalty_growth=1.2,
+    penalty_growth=1.1,
     penalty_per_move=0.01,
     checkpoint_dir='checkpoints',
     save_frequency=1
@@ -372,7 +372,7 @@ def train(
         val_split: Validation split ratio
         random_action_prob: Probability of forcing a random environment action
         discount: Discount factor for reward returns (default: 0.99)
-        penalty_growth: Growth factor for penalty returns (default: 1.2)
+        penalty_growth: Growth factor for penalty returns (default: 1.1)
         penalty_per_move: Penalty per left/right/rotate action (default: 0.01)
         checkpoint_dir: Directory to save checkpoints
         save_frequency: Save checkpoint every N iterations
@@ -593,7 +593,7 @@ def main():
                         help='Validation split ratio')
     parser.add_argument('--discount', type=float, default=0.99,
                         help='Discount factor for reward returns')
-    parser.add_argument('--penalty-growth', type=float, default=1.2,
+    parser.add_argument('--penalty-growth', type=float, default=1.1,
                         help='Growth factor for penalty returns')
     parser.add_argument('--penalty-per-move', type=float, default=0.01,
                         help='Penalty value for left/right/rotate actions')
