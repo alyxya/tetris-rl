@@ -55,22 +55,29 @@ class TetrisValueDataset(Dataset):
         )
 
 
-def collect_data(teacher_agent, n_episodes=10, gamma=0.95, verbose=True):
+def collect_data(teacher_agent, student_agent=None, n_episodes=10, student_mix=0.0, gamma=0.95, verbose=True):
     """
-    Collect training data from teacher agent.
+    Collect training data using mix of teacher and student agents.
 
     Args:
-        teacher_agent: Teacher agent (e.g., HeuristicAgent) that provides actions
+        teacher_agent: Teacher agent (e.g., HeuristicAgent) that provides action labels
+        student_agent: Student agent (ValueAgent) that can also act (optional)
         n_episodes: Number of episodes to collect
+        student_mix: Probability of using student's action vs teacher's action (0.0 = pure teacher, 1.0 = pure student)
         gamma: Discount factor for computing discounted return-to-go (default: 0.95)
         verbose: Print progress
 
     Returns:
         states_empty: list of boards with piece as empty
         states_filled: list of boards with piece as filled
-        actions: list of teacher actions
+        actions: list of teacher actions (labels)
         rewards: list of discounted return-to-go values for (state, action) pairs
         episode_rewards: list of episode total rewards
+
+    Note:
+        When student_mix > 0, student acts in environment with probability student_mix,
+        but teacher's action is still used as the label for learning. This allows the
+        student to explore states it would visit while still learning from teacher's policy.
     """
     env = tetris.Tetris()
 
@@ -81,11 +88,16 @@ def collect_data(teacher_agent, n_episodes=10, gamma=0.95, verbose=True):
     episode_rewards = []
 
     if verbose:
-        print(f"Collecting data from {n_episodes} episodes (gamma={gamma})...")
+        if student_mix > 0 and student_agent is not None:
+            print(f"Collecting data from {n_episodes} episodes (gamma={gamma}, student_mix={student_mix:.2f})...")
+        else:
+            print(f"Collecting data from {n_episodes} episodes (gamma={gamma})...")
 
     for episode in tqdm(range(n_episodes), disable=not verbose):
         obs, _ = env.reset()
         teacher_agent.reset()
+        if student_agent is not None:
+            student_agent.reset()
         done = False
         episode_reward = 0
 
@@ -104,16 +116,24 @@ def collect_data(teacher_agent, n_episodes=10, gamma=0.95, verbose=True):
             board_filled = locked.copy()
             board_filled[active] = 1.0
 
-            # Get teacher action
+            # Get teacher action (always - this is the label)
             teacher_action = teacher_agent.choose_action(obs[0])
 
-            # Store state and action
+            # Decide which action to actually execute in environment
+            if student_agent is not None and np.random.random() < student_mix:
+                # Student acts (for exploration/on-policy data)
+                action_to_execute = student_agent.choose_action(obs[0], deterministic=False)
+            else:
+                # Teacher acts
+                action_to_execute = teacher_action
+
+            # Store state and teacher's action (the label)
             episode_states_empty.append(board_empty)
             episode_states_filled.append(board_filled)
             episode_actions.append(teacher_action)
 
-            # Step environment
-            obs, reward, terminated, truncated, info = env.step([teacher_action])
+            # Step environment with chosen action
+            obs, reward, terminated, truncated, info = env.step([action_to_execute])
             done = terminated[0] or truncated[0]
             step_reward = reward[0]
             episode_reward += step_reward
@@ -261,6 +281,8 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, scheduler=None, devi
 def train(
     teacher_type='heuristic',
     gamma=0.95,
+    initial_student_mix=0.0,
+    final_student_mix=0.5,
     checkpoint=None,
     n_iterations=10,
     episodes_per_iter=20,
@@ -273,11 +295,13 @@ def train(
     save_frequency=1
 ):
     """
-    Main training loop.
+    Main training loop with optional student exploration.
 
     Args:
         teacher_type: Type of teacher agent ('heuristic' is default)
         gamma: Discount factor for computing discounted return-to-go (default: 0.95)
+        initial_student_mix: Initial probability of student acting (default: 0.0 = pure teacher)
+        final_student_mix: Final probability of student acting (default: 0.5 = 50/50 mix)
         checkpoint: Path to checkpoint to resume from (None = start from scratch)
         n_iterations: Number of data collection iterations
         episodes_per_iter: Episodes to collect per iteration
@@ -288,6 +312,13 @@ def train(
         val_split: Validation split ratio
         checkpoint_dir: Directory to save checkpoints
         save_frequency: Save checkpoint every N iterations
+
+    Note:
+        student_mix controls how much the student (value agent) explores vs follows teacher.
+        It linearly increases from initial_student_mix to final_student_mix over iterations.
+        - 0.0: Pure teacher demonstrations (no exploration)
+        - 0.5: 50/50 mix of student and teacher actions
+        - 1.0: Pure student exploration (teacher only labels)
     """
     device = torch.device(device)
 
@@ -340,6 +371,7 @@ def train(
     print(f"{'='*70}")
     print(f"Teacher: {teacher_type}")
     print(f"Gamma (discount factor): {gamma}")
+    print(f"Student mix: {initial_student_mix:.2f} -> {final_student_mix:.2f}")
     print(f"Device: {device}")
     print(f"Iterations: {n_iterations}")
     print(f"Episodes per iteration: {episodes_per_iter}")
@@ -351,14 +383,21 @@ def train(
 
     # Main training loop
     for iteration in range(start_iteration, n_iterations):
+        # Calculate student_mix for this iteration (linear schedule)
+        student_mix = initial_student_mix + (final_student_mix - initial_student_mix) * (
+            iteration / max(n_iterations - 1, 1)
+        )
+
         print(f"\n{'='*70}")
-        print(f"Iteration {iteration + 1}/{n_iterations}")
+        print(f"Iteration {iteration + 1}/{n_iterations} (student_mix={student_mix:.2f})")
         print(f"{'='*70}")
 
-        # Collect data from teacher
+        # Collect data with student/teacher mix
         states_empty, states_filled, actions, rewards, episode_rewards = collect_data(
             teacher_agent,
+            student_agent=value_agent,
             n_episodes=episodes_per_iter,
+            student_mix=student_mix,
             gamma=gamma,
             verbose=True
         )
@@ -474,6 +513,10 @@ def main():
                         help='Teacher agent type (default: heuristic)')
     parser.add_argument('--gamma', type=float, default=0.95,
                         help='Discount factor for return-to-go (default: 0.95)')
+    parser.add_argument('--initial-student-mix', type=float, default=0.0,
+                        help='Initial probability of student acting vs teacher (default: 0.0)')
+    parser.add_argument('--final-student-mix', type=float, default=0.5,
+                        help='Final probability of student acting vs teacher (default: 0.5)')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='Path to checkpoint to resume from')
     parser.add_argument('--device', type=str, default='cpu',
@@ -507,6 +550,8 @@ def main():
     train(
         teacher_type=args.teacher,
         gamma=args.gamma,
+        initial_student_mix=args.initial_student_mix,
+        final_student_mix=args.final_student_mix,
         checkpoint=args.checkpoint,
         n_iterations=args.iterations,
         episodes_per_iter=args.episodes,

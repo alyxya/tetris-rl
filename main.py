@@ -3,12 +3,14 @@ Main script for running Tetris agents.
 
 Usage:
     python main.py --agent heuristic [--episodes 1] [--render]
-    python main.py --agent hybrid --model-path models/best_model.pt [--episodes 1] [--render]
+    python main.py --agent cnn --model-path models/cnn_agent.pt [--episodes 1] [--render]
+    python main.py --agent value --model-path models/value_agent.pt [--episodes 1] [--render]
+    python main.py --agent hybrid --model-path models/cnn_agent.pt [--episodes 1] [--render]
 """
 
 import argparse
 from pufferlib.ocean.tetris import tetris
-from agents import HeuristicAgent, CNNAgent, HybridAgent
+from agents import HeuristicAgent, CNNAgent, HybridAgent, ValueAgent
 
 
 def run_episode(env, agent, render=False, verbose=True):
@@ -53,7 +55,7 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Run Tetris agents')
     parser.add_argument('--agent', type=str, default='heuristic',
-                        choices=['heuristic', 'cnn', 'hybrid'],
+                        choices=['heuristic', 'cnn', 'value', 'hybrid'],
                         help='Agent type to use')
     parser.add_argument('--model-path', type=str, default=None,
                         help='Path to CNN model weights (for cnn agent)')
@@ -77,6 +79,13 @@ def main():
     elif args.agent == 'cnn':
         agent = CNNAgent(model_path=args.model_path)
         print(f"Running CNNAgent for {args.episodes} episode(s)...")
+        if args.model_path:
+            print(f"Loaded model from {args.model_path}")
+        else:
+            print("Using randomly initialized model")
+    elif args.agent == 'value':
+        agent = ValueAgent(model_path=args.model_path)
+        print(f"Running ValueAgent for {args.episodes} episode(s)...")
         if args.model_path:
             print(f"Loaded model from {args.model_path}")
         else:
