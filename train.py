@@ -218,7 +218,6 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
     """Train for one epoch of Q-value regression with teacher actions."""
     model.train()
     total_loss = 0.0
-    total_correct = 0
     total_samples = 0
 
     for board_empty, board_filled, actions, q_targets in train_loader:
@@ -235,18 +234,15 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
         optimizer.step()
 
         total_loss += loss.item() * actions.size(0)
-        _, predicted = q_values.max(1)
-        total_correct += predicted.eq(actions).sum().item()
         total_samples += actions.size(0)
 
-    return total_loss / total_samples, 100.0 * total_correct / total_samples
+    return total_loss / total_samples
 
 
 def validate(model, val_loader, criterion, device):
     """Validate Q-value regression performance."""
     model.eval()
     total_loss = 0.0
-    total_correct = 0
     total_samples = 0
 
     with torch.no_grad():
@@ -261,11 +257,9 @@ def validate(model, val_loader, criterion, device):
             loss = criterion(selected_q, q_targets)
 
             total_loss += loss.item() * actions.size(0)
-            _, predicted = q_values.max(1)
-            total_correct += predicted.eq(actions).sum().item()
             total_samples += actions.size(0)
 
-    return total_loss / total_samples, 100.0 * total_correct / total_samples
+    return total_loss / total_samples
 
 
 def save_checkpoint(model, optimizer, scheduler, iteration, epoch, best_metrics,
@@ -451,12 +445,11 @@ def train(
         # Train for several epochs
         print(f"\nTraining for {epochs_per_iter} epochs...")
         for epoch in range(epochs_per_iter):
-            train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device)
-            val_loss, val_acc = validate(model, val_loader, criterion, device)
+            train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
+            val_loss = validate(model, val_loader, criterion, device)
 
             print(f"  Epoch {epoch+1}/{epochs_per_iter}: "
-                  f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
-                  f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+                  f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
 
             # Save best validation model
             if val_loss < best_metrics['val_loss']:
