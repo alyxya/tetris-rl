@@ -22,9 +22,7 @@ import numpy as np
 import sys
 import os
 
-# Add parent directory to path to import base_agent
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from base_agent import BaseTetrisAgent
+from agents.base_agent import BaseTetrisAgent
 
 
 class HeuristicAgent(BaseTetrisAgent):

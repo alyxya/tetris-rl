@@ -15,8 +15,7 @@ import numpy as np
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from base_agent import BaseTetrisAgent
+from agents.base_agent import BaseTetrisAgent
 from agents.cnn_agent import CNNAgent
 from agents.heuristic_agent import HeuristicAgent
 
