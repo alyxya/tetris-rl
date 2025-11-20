@@ -21,7 +21,7 @@ from agents.q_agent import TetrisQNetwork
 from utils.rewards import extract_line_clear_reward
 
 
-def extract_boards(obs_flat, n_rows=20, n_cols=10):
+def extract_boards(obs_flat, n_rows, n_cols):
     """Convert flattened env observation into (board_empty, board_filled)."""
     board = obs_flat[: n_rows * n_cols].reshape(n_rows, n_cols)
     locked = (board == 1).astype(np.float32)
@@ -135,6 +135,9 @@ class QLearningTrainer:
 def evaluate_model(model, device, n_episodes=10):
     """Run greedy episodes to gauge performance."""
     env = tetris.Tetris(seed=int(time.time() * 1e6))
+    n_rows = env.n_rows
+    n_cols = env.n_cols
+    board_size = n_rows * n_cols
     rewards = []
 
     for _ in range(n_episodes):
@@ -143,8 +146,8 @@ def evaluate_model(model, device, n_episodes=10):
         total_reward = 0.0
 
         while not done:
-            board_empty, board_filled = extract_boards(obs[0])
-            prev_board = obs[0, :200].reshape(20, 10).copy()
+            board_empty, board_filled = extract_boards(obs[0], n_rows, n_cols)
+            prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
             board_empty_t = torch.FloatTensor(board_empty).unsqueeze(0).unsqueeze(0).to(device)
             board_filled_t = torch.FloatTensor(board_filled).unsqueeze(0).unsqueeze(0).to(device)
             with torch.no_grad():
@@ -152,7 +155,7 @@ def evaluate_model(model, device, n_episodes=10):
 
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
-            next_board = next_obs[0, :200].reshape(20, 10)
+            next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
             total_reward += extract_line_clear_reward(prev_board, next_board)
             obs = next_obs
 
@@ -237,11 +240,14 @@ def train_rl(
         best_reward = ckpt.get('best_reward', -float('inf'))
 
     env = tetris.Tetris(seed=int(time.time() * 1e6))
+    n_rows = env.n_rows
+    n_cols = env.n_cols
+    board_size = n_rows * n_cols
     global_step = 0
 
     for episode in range(start_episode, n_episodes):
         obs, _ = env.reset(seed=int(time.time() * 1e6))
-        board_empty, board_filled = extract_boards(obs[0])
+        board_empty, board_filled = extract_boards(obs[0], n_rows, n_cols)
         done = False
         episode_reward = 0.0
 
@@ -249,12 +255,12 @@ def train_rl(
         epsilon = max(epsilon_end, epsilon_start - frac * (epsilon_start - epsilon_end) * epsilon_decay)
 
         while not done:
-            prev_board = obs[0, :200].reshape(20, 10).copy()
+            prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
             action = trainer.select_action(board_empty, board_filled, epsilon)
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
-            next_empty, next_filled = extract_boards(next_obs[0])
-            next_board = next_obs[0, :200].reshape(20, 10)
+            next_empty, next_filled = extract_boards(next_obs[0], n_rows, n_cols)
+            next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
             reward_value = extract_line_clear_reward(prev_board, next_board)
 
             trainer.store((board_empty, board_filled, action, reward_value, next_empty, next_filled, float(done)))

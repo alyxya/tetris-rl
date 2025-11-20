@@ -5,8 +5,6 @@ from typing import Iterable, List
 import numpy as np
 
 
-N_ROWS = 20
-N_COLS = 10
 LINES_TO_REWARD = {0: 0.0, 1: 0.1, 2: 0.3, 3: 0.6, 4: 1.0}
 
 
@@ -18,11 +16,15 @@ def extract_line_clear_reward(prev_board, next_board) -> float:
 
 def count_lines_cleared(prev_board, next_board) -> int:
     """Infer cleared lines from change in locked block counts."""
-    prev_locked = _count_locked(prev_board)
-    next_locked = _count_locked(next_board)
+    prev_arr = _ensure_board(prev_board)
+    next_arr = _ensure_board(next_board)
+
+    prev_locked = int(np.count_nonzero(prev_arr == 1))
+    next_locked = int(np.count_nonzero(next_arr == 1))
+    cols = prev_arr.shape[1]
 
     delta = prev_locked + 4 - next_locked
-    lines = max(0, min(4, delta // N_COLS))
+    lines = max(0, min(4, delta // cols))
     return lines
 
 
@@ -36,8 +38,8 @@ def compute_discounted_returns(rewards: Iterable[float], gamma: float = 0.99) ->
     return returns
 
 
-def _count_locked(board) -> int:
+def _ensure_board(board) -> np.ndarray:
     arr = np.asarray(board)
-    if arr.shape != (N_ROWS, N_COLS):
-        arr = arr.reshape(N_ROWS, N_COLS)
-    return int(np.count_nonzero(arr == 1))
+    if arr.ndim != 2:
+        raise ValueError("Board arrays must be 2D (rows x cols)")
+    return arr

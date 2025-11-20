@@ -32,6 +32,9 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
         total_reward: Total reward achieved
     """
     obs, _ = env.reset(seed=int(time.time() * 1e6))
+    n_rows = env.n_rows
+    n_cols = env.n_cols
+    board_size = n_rows * n_cols
     agent.reset()
 
     done = False
@@ -47,14 +50,14 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
         else:
             action = agent.choose_action(obs[0])
 
-        prev_board = obs[0, :200].reshape(20, 10).copy()
+        prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
         next_obs, reward, terminated, truncated, info = env.step([action])
 
         if render:
             env.render()
 
         # Extract line clear rewards only (for consistent Q-value targets)
-        next_board = next_obs[0, :200].reshape(20, 10)
+        next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
         step_reward = extract_line_clear_reward(prev_board, next_board)
         total_reward += step_reward
         steps += 1

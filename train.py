@@ -71,6 +71,12 @@ def collect_data(
         episode_rewards: list of per-episode line clear rewards
     """
     env = tetris.Tetris(seed=int(time.time() * 1e6))
+    n_rows = env.n_rows
+    n_cols = env.n_cols
+    board_size = n_rows * n_cols
+    n_rows = env.n_rows
+    n_cols = env.n_cols
+    board_size = n_rows * n_cols
 
     states_empty = []
     states_filled = []
@@ -97,7 +103,7 @@ def collect_data(
 
         while not done:
             # Parse observation
-            full_board = obs[0, :200].reshape(20, 10)
+            full_board = obs[0, :board_size].reshape(n_rows, n_cols)
             locked = (full_board == 1).astype(np.float32)
             active = (full_board == 2)
 
@@ -124,7 +130,7 @@ def collect_data(
             done = terminated[0] or truncated[0]
 
             # Extract line clear rewards only
-            next_board = next_obs[0, :200].reshape(20, 10)
+            next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
             step_reward = extract_line_clear_reward(prev_board, next_board)
             episode_reward += step_reward
             episode_step_rewards.append(step_reward)
@@ -160,12 +166,12 @@ def evaluate_agent(agent, n_episodes=10):
         episode_lines = 0
 
         while not done:
-            prev_board = obs[0, :200].reshape(20, 10).copy()
+            prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
             action = agent.choose_action(obs[0], deterministic=True)
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
 
-            next_board = next_obs[0, :200].reshape(20, 10)
+            next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
             step_reward = extract_line_clear_reward(prev_board, next_board)
             episode_reward += step_reward
             episode_lines += count_lines_cleared(prev_board, next_board)
