@@ -59,6 +59,7 @@ def collect_data(
     penalty_growth=1.1,
     penalty_per_move=0.01,
     verbose=True,
+    debug_qvalues=False,
 ):
     """
     Collect training data by letting the teacher (with optional random noise) play.
@@ -71,6 +72,7 @@ def collect_data(
         penalty_growth: Growth factor for penalty returns (default: 1.1)
         penalty_per_move: Penalty value for left/right/rotate actions (default: 0.01)
         verbose: Print progress
+        debug_qvalues: Print detailed Q-value computation for first episode
 
     Returns:
         states_empty: list of boards with piece as empty
@@ -186,8 +188,8 @@ def collect_data(
         # Combined Q-value = reward_returns - penalty_returns
         combined_q_values = [r - p for r, p in zip(reward_returns, penalty_returns)]
 
-        # Print detailed Q-value info for first episode
-        if episode == 0 and verbose:
+        # Print detailed Q-value info for first episode (if debug flag is set)
+        if episode == 0 and debug_qvalues:
             print(f"\n{'='*80}")
             print(f"Q-value Computation Details (Episode 1, first 30 steps)")
             print(f"{'='*80}")
@@ -357,7 +359,8 @@ def train(
     penalty_growth=1.1,
     penalty_per_move=0.01,
     checkpoint_dir='checkpoints',
-    save_frequency=1
+    save_frequency=1,
+    debug_qvalues=False
 ):
     """
     Main training loop.
@@ -378,6 +381,7 @@ def train(
         penalty_per_move: Penalty per left/right/rotate action (default: 0.01)
         checkpoint_dir: Directory to save checkpoints
         save_frequency: Save checkpoint every N iterations
+        debug_qvalues: Print detailed Q-value computation table (default: False)
     """
     device = torch.device(device)
 
@@ -458,7 +462,8 @@ def train(
             discount=discount,
             penalty_growth=penalty_growth,
             penalty_per_move=penalty_per_move,
-            verbose=True
+            verbose=True,
+            debug_qvalues=debug_qvalues
         )
 
         # Add to aggregate dataset
@@ -610,6 +615,10 @@ def main():
     parser.add_argument('--save-frequency', type=int, default=1,
                         help='Save checkpoint every N iterations')
 
+    # Debug options
+    parser.add_argument('--debug-qvalues', action='store_true',
+                        help='Print detailed Q-value computation table for first episode')
+
     args = parser.parse_args()
 
     train(
@@ -627,7 +636,8 @@ def main():
         penalty_growth=args.penalty_growth,
         penalty_per_move=args.penalty_per_move,
         checkpoint_dir=args.checkpoint_dir,
-        save_frequency=args.save_frequency
+        save_frequency=args.save_frequency,
+        debug_qvalues=args.debug_qvalues
     )
 
 
