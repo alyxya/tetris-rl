@@ -355,12 +355,6 @@ def train(
     else:
         raise ValueError(f"Unknown teacher type: {teacher_type}")
 
-    # Aggregate dataset
-    all_states_empty = []
-    all_states_filled = []
-    all_actions = []
-    all_rewards = []
-
     # Training state
     start_iteration = 0
     best_metrics = {
@@ -416,16 +410,10 @@ def train(
             verbose=True
         )
 
-        # Add to aggregate dataset
-        all_states_empty.extend(states_empty)
-        all_states_filled.extend(states_filled)
-        all_actions.extend(actions)
-        all_rewards.extend(rewards)
+        print(f"Collected {len(actions):,} samples this iteration")
 
-        print(f"Total dataset size: {len(all_actions):,} samples")
-
-        # Create train/val split
-        n_samples = len(all_actions)
+        # Create train/val split (only use current iteration's data)
+        n_samples = len(actions)
         n_val = int(n_samples * val_split)
         indices = np.random.permutation(n_samples)
 
@@ -433,17 +421,17 @@ def train(
         val_idx = indices[:n_val]
 
         train_dataset = TetrisValueDataset(
-            [all_states_empty[i] for i in train_idx],
-            [all_states_filled[i] for i in train_idx],
-            [all_actions[i] for i in train_idx],
-            [all_rewards[i] for i in train_idx]
+            [states_empty[i] for i in train_idx],
+            [states_filled[i] for i in train_idx],
+            [actions[i] for i in train_idx],
+            [rewards[i] for i in train_idx]
         )
 
         val_dataset = TetrisValueDataset(
-            [all_states_empty[i] for i in val_idx],
-            [all_states_filled[i] for i in val_idx],
-            [all_actions[i] for i in val_idx],
-            [all_rewards[i] for i in val_idx]
+            [states_empty[i] for i in val_idx],
+            [states_filled[i] for i in val_idx],
+            [actions[i] for i in val_idx],
+            [rewards[i] for i in val_idx]
         )
 
         train_loader = DataLoader(
@@ -467,7 +455,7 @@ def train(
                 best_metrics['val_loss'] = val_loss
                 save_checkpoint(
                     model, optimizer, scheduler, iteration, epoch,
-                    best_metrics, len(all_actions), checkpoint_dir, 'best_val.pt'
+                    best_metrics, len(actions), checkpoint_dir, 'best_val.pt'
                 )
                 print(f"    -> Saved best validation model (val_loss: {val_loss:.4f})")
 
@@ -485,7 +473,7 @@ def train(
             best_metrics['eval_reward'] = eval_metrics['mean_reward']
             save_checkpoint(
                 model, optimizer, scheduler, iteration, epochs_per_iter - 1,
-                best_metrics, len(all_actions), checkpoint_dir, 'best_performance.pt'
+                best_metrics, len(actions), checkpoint_dir, 'best_performance.pt'
             )
             print(f"  -> Saved best performance model (reward: {eval_metrics['mean_reward']:.2f})")
 
@@ -494,14 +482,14 @@ def train(
             filename = f'checkpoint_iter{iteration+1:03d}.pt'
             save_checkpoint(
                 model, optimizer, scheduler, iteration, epochs_per_iter - 1,
-                best_metrics, len(all_actions), checkpoint_dir, filename
+                best_metrics, len(actions), checkpoint_dir, filename
             )
             print(f"\nCheckpoint saved: {filename}")
 
     # Save final checkpoint
     save_checkpoint(
         model, optimizer, scheduler, n_iterations - 1, epochs_per_iter - 1,
-        best_metrics, len(all_actions), checkpoint_dir, 'final.pt'
+        best_metrics, len(actions), checkpoint_dir, 'final.pt'
     )
 
     # Save final model weights only (for easy loading)
@@ -512,7 +500,6 @@ def train(
     print(f"{'='*70}")
     print(f"Best validation loss: {best_metrics['val_loss']:.4f}")
     print(f"Best evaluation reward: {best_metrics['eval_reward']:.2f}")
-    print(f"Total dataset size: {len(all_actions):,} samples")
     print(f"Checkpoints saved to: {checkpoint_dir}/")
     print(f"Final model saved to: models/value_agent.pt")
 
