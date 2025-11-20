@@ -65,6 +65,8 @@ def main():
                         help='Render the game (warning: slow)')
     parser.add_argument('--verbose', action='store_true', default=True,
                         help='Print progress during episodes')
+    parser.add_argument('--student-probability', type=float, default=0.5,
+                        help='For hybrid agent: probability of using student vs teacher (default: 0.5)')
 
     args = parser.parse_args()
 
@@ -91,13 +93,13 @@ def main():
         else:
             print("Using randomly initialized model")
     elif args.agent == 'hybrid':
-        agent = HybridAgent(model_path=args.model_path)
+        agent = HybridAgent(model_path=args.model_path, student_probability=args.student_probability)
         print(f"Running HybridAgent for {args.episodes} episode(s)...")
-        print("The agent randomly chooses between CNN and Heuristic with 50/50 probability.")
+        print(f"The agent uses student with {args.student_probability:.1%} probability, teacher with {1-args.student_probability:.1%} probability.")
         if args.model_path:
-            print(f"Loaded CNN model from {args.model_path}")
+            print(f"Loaded student model from {args.model_path}")
         else:
-            print("Using randomly initialized CNN model")
+            print("Using randomly initialized student model")
     else:
         raise ValueError(f"Unknown agent: {args.agent}")
 
@@ -119,8 +121,8 @@ def main():
         # Print usage stats for hybrid agent
         if args.agent == 'hybrid':
             stats = agent.get_usage_stats()
-            print(f"  CNN used: {stats['cnn_count']} times ({stats['cnn_percentage']:.1f}%)")
-            print(f"  Heuristic used: {stats['heuristic_count']} times ({stats['heuristic_percentage']:.1f}%)")
+            print(f"  Student used: {stats['student_count']} times ({stats['student_percentage']:.1f}%)")
+            print(f"  Teacher used: {stats['teacher_count']} times ({stats['teacher_percentage']:.1f}%)")
 
     # Print summary
     if args.episodes > 1:
