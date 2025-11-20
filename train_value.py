@@ -513,10 +513,10 @@ def main():
                         help='Teacher agent type (default: heuristic)')
     parser.add_argument('--gamma', type=float, default=0.95,
                         help='Discount factor for return-to-go (default: 0.95)')
-    parser.add_argument('--initial-student-mix', type=float, default=0.0,
-                        help='Initial probability of student acting vs teacher (default: 0.0)')
-    parser.add_argument('--final-student-mix', type=float, default=0.5,
-                        help='Final probability of student acting vs teacher (default: 0.5)')
+    parser.add_argument('--initial-student-mix', type=float, default=0.5,
+                        help='Initial probability of student acting vs teacher (default: 0.5)')
+    parser.add_argument('--final-student-mix', type=float, default=0.0,
+                        help='Final probability of student acting vs teacher (default: 0.0)')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='Path to checkpoint to resume from')
     parser.add_argument('--device', type=str, default='cpu',
