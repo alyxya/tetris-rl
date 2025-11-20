@@ -1,8 +1,9 @@
 from pufferlib.ocean.tetris import tetris
+import time
 
-env = tetris.Tetris()
+env = tetris.Tetris(seed=int(time.time() * 1e6))
 
-obs, info = env.reset()
+obs, info = env.reset(seed=int(time.time() * 1e6))
 done = False
 total_reward = 0
 

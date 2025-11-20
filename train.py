@@ -13,6 +13,7 @@ import numpy as np
 from tqdm import tqdm
 import argparse
 import os
+import time
 from datetime import datetime
 
 from pufferlib.ocean.tetris import tetris
@@ -60,7 +61,7 @@ def collect_data(
         actions: list of teacher action labels
         episode_rewards: list of episode rewards
     """
-    env = tetris.Tetris()
+    env = tetris.Tetris(seed=int(time.time() * 1e6))
 
     states_empty = []
     states_filled = []
@@ -75,7 +76,7 @@ def collect_data(
         )
 
     for episode in tqdm(range(n_episodes), disable=not verbose):
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=int(time.time() * 1e6))
         teacher_agent.reset()
         done = False
         episode_reward = 0
@@ -128,12 +129,12 @@ def collect_data(
 
 def evaluate_agent(agent, n_episodes=10):
     """Evaluate agent performance."""
-    env = tetris.Tetris()
+    env = tetris.Tetris(seed=int(time.time() * 1e6))
     total_rewards = []
     total_lines = []
 
     for _ in range(n_episodes):
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=int(time.time() * 1e6))
         done = False
         episode_reward = 0
         episode_lines = 0

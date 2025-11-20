@@ -9,6 +9,7 @@ Workflow:
 import argparse
 import os
 import random
+import time
 from collections import deque
 
 import numpy as np
@@ -132,11 +133,11 @@ class QLearningTrainer:
 
 def evaluate_model(model, device, n_episodes=10):
     """Run greedy episodes to gauge performance."""
-    env = tetris.Tetris()
+    env = tetris.Tetris(seed=int(time.time() * 1e6))
     rewards = []
 
     for _ in range(n_episodes):
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=int(time.time() * 1e6))
         done = False
         total_reward = 0.0
 
@@ -231,11 +232,11 @@ def train_rl(
         start_episode = ckpt.get('episode', 0) + 1
         best_reward = ckpt.get('best_reward', -float('inf'))
 
-    env = tetris.Tetris()
+    env = tetris.Tetris(seed=int(time.time() * 1e6))
     global_step = 0
 
     for episode in range(start_episode, n_episodes):
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=int(time.time() * 1e6))
         board_empty, board_filled = extract_boards(obs[0])
         done = False
         episode_reward = 0.0
