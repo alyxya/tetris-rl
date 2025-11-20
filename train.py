@@ -55,7 +55,7 @@ def collect_data(
     n_episodes=10,
     random_prob=0.1,
     discount=0.99,
-    height_penalty_weight=0.001,
+    height_penalty_weight=0.0002,
     verbose=True,
     debug_qvalues=False,
 ):
@@ -67,7 +67,7 @@ def collect_data(
         n_episodes: Number of episodes to collect
         random_prob: Probability of forcing a random action for extra coverage
         discount: Discount factor for returns (default: 0.99)
-        height_penalty_weight: Penalty weight per unit height for movements (default: 0.001)
+        height_penalty_weight: Penalty weight per unit height for movements (default: 0.0002)
         verbose: Print progress
         debug_qvalues: Print detailed Q-value computation for first episode
 
@@ -192,7 +192,7 @@ def collect_data(
     return states_empty, states_filled, actions, q_targets, episode_rewards
 
 
-def evaluate_agent(agent, n_episodes=10, height_penalty_weight=0.001):
+def evaluate_agent(agent, n_episodes=10, height_penalty_weight=0.0002):
     """Evaluate agent performance with height-based penalty system."""
     env = tetris.Tetris(seed=int(time.time() * 1e6))
     n_rows = env.n_rows
@@ -337,7 +337,7 @@ def train(
     val_split=0.2,
     random_action_prob=0.1,
     discount=0.99,
-    height_penalty_weight=0.001,
+    height_penalty_weight=0.0002,
     checkpoint_dir='checkpoints',
     save_frequency=1,
     debug_qvalues=False
@@ -357,7 +357,7 @@ def train(
         val_split: Validation split ratio
         random_action_prob: Probability of forcing a random environment action
         discount: Discount factor for returns (default: 0.99)
-        height_penalty_weight: Penalty weight per unit height for movements (default: 0.001)
+        height_penalty_weight: Penalty weight per unit height for movements (default: 0.0002)
         checkpoint_dir: Directory to save checkpoints
         save_frequency: Save checkpoint every N iterations
         debug_qvalues: Print detailed Q-value computation table (default: False)
@@ -577,7 +577,7 @@ def main():
                         help='Validation split ratio')
     parser.add_argument('--discount', type=float, default=0.99,
                         help='Discount factor for returns')
-    parser.add_argument('--height-penalty-weight', type=float, default=0.001,
+    parser.add_argument('--height-penalty-weight', type=float, default=0.0002,
                         help='Penalty weight per unit height for movement actions')
 
     # Data diversity
