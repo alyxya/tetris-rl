@@ -25,7 +25,6 @@ from agents.q_agent import QValueAgent, TetrisQNetwork
 from utils.rewards import (
     extract_line_clear_reward,
     compute_discounted_returns,
-    compute_penalty_returns,
     count_lines_cleared,
 )
 
@@ -56,8 +55,7 @@ def collect_data(
     n_episodes=10,
     random_prob=0.1,
     discount=0.99,
-    penalty_growth=1.005,
-    penalty_per_move=0.01,
+    height_penalty_weight=0.001,
     verbose=True,
     debug_qvalues=False,
 ):
@@ -68,9 +66,8 @@ def collect_data(
         teacher_agent: Teacher agent (e.g., HeuristicAgent) that provides labels
         n_episodes: Number of episodes to collect
         random_prob: Probability of forcing a random action for extra coverage
-        discount: Discount factor used for line-clear return targets (default: 0.99)
-        penalty_growth: Growth factor for penalty returns (default: 1.005)
-        penalty_per_move: Penalty value for left/right/rotate actions (default: 0.01)
+        discount: Discount factor for returns (default: 0.99)
+        height_penalty_weight: Penalty weight per unit height for movements (default: 0.001)
         verbose: Print progress
         debug_qvalues: Print detailed Q-value computation for first episode
 
@@ -78,7 +75,7 @@ def collect_data(
         states_empty: list of boards with piece as empty
         states_filled: list of boards with piece as filled
         actions: list of teacher action labels
-        q_values: list of combined Q-values (reward_returns - penalty_returns)
+        q_values: list of discounted returns (rewards - height penalties)
         episode_rewards: list of per-episode net rewards
     """
     env = tetris.Tetris(seed=int(time.time() * 1e6))
@@ -99,7 +96,7 @@ def collect_data(
             f"from {n_episodes} episodes..."
         )
 
-    # Movement actions that incur penalties (left, right, rotate)
+    # Movement actions that incur height-based penalties (left, right, rotate)
     penalty_actions = {1, 2, 3}
 
     for episode in tqdm(range(n_episodes), disable=not verbose):
@@ -110,12 +107,7 @@ def collect_data(
         episode_states_empty = []
         episode_states_filled = []
         episode_actions = []
-        episode_step_rewards = []
-        episode_step_penalties = []
-        episode_piece_boundaries = []  # Track when pieces lock
-
-        # Track locked cell count to detect when pieces lock
-        prev_locked_count = np.count_nonzero(obs[0, :board_size] == 1)
+        episode_net_rewards = []  # Rewards minus height penalties
 
         while not done:
             # Parse observation
@@ -149,69 +141,47 @@ def collect_data(
             next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
             step_reward = extract_line_clear_reward(prev_board, next_board)
 
-            # Compute penalty for movement actions
-            step_penalty = penalty_per_move if action_to_take in penalty_actions else 0.0
+            # Compute height-based penalty for movement actions
+            # Height = row index of topmost active cell (0 = top row)
+            step_penalty = 0.0
+            if action_to_take in penalty_actions and np.any(active):
+                active_rows = np.where(active)[0]
+                height_from_top = np.min(active_rows)  # Smaller row = higher up
+                step_penalty = height_penalty_weight * height_from_top
 
-            # Store step data BEFORE checking piece boundaries
-            episode_reward += step_reward - step_penalty
-            episode_step_rewards.append(step_reward)
-            episode_step_penalties.append(step_penalty)
+            # Net reward for this step
+            net_reward = step_reward - step_penalty
+            episode_reward += net_reward
+            episode_net_rewards.append(net_reward)
             episode_actions.append(action_to_take)
-
-            # Check if piece locked (locked cell count changed)
-            # Must check AFTER appending action so boundary is at correct index
-            next_locked_count = np.count_nonzero(next_obs[0, :board_size] == 1)
-            if next_locked_count != prev_locked_count:
-                # Piece locked - mark boundary at current index
-                # This makes the next action (index len(episode_actions)) start of new piece
-                episode_piece_boundaries.append(len(episode_actions))
-            prev_locked_count = next_locked_count
 
             obs = next_obs
 
         episode_rewards.append(episode_reward)
 
-        # Compute reward returns (can span entire episode)
-        reward_returns = compute_discounted_returns(episode_step_rewards, gamma=discount)
-
-        # Compute penalty returns per piece (reset at piece boundaries)
-        penalty_returns = [0.0] * len(episode_step_penalties)
-        piece_boundaries = [0] + episode_piece_boundaries + [len(episode_step_penalties)]
-
-        for i in range(len(piece_boundaries) - 1):
-            start_idx = piece_boundaries[i]
-            end_idx = piece_boundaries[i + 1]
-            piece_penalties = episode_step_penalties[start_idx:end_idx]
-            piece_penalty_returns = compute_penalty_returns(piece_penalties, growth=penalty_growth)
-            penalty_returns[start_idx:end_idx] = piece_penalty_returns
-
-        # Combined Q-value = reward_returns - penalty_returns
-        combined_q_values = [r - p for r, p in zip(reward_returns, penalty_returns)]
+        # Compute discounted returns from net rewards (reward - penalty already combined)
+        q_values_episode = compute_discounted_returns(episode_net_rewards, gamma=discount)
 
         # Print detailed Q-value info for first episode (if debug flag is set)
         if episode == 0 and debug_qvalues:
             print(f"\n{'='*80}")
             print(f"Q-value Computation Details (Episode 1, first 30 steps)")
             print(f"{'='*80}")
-            print(f"Piece boundaries: {episode_piece_boundaries}")
-            print(f"Total steps: {len(combined_q_values)}, Total pieces: {len(piece_boundaries)-1}")
+            print(f"Total steps: {len(q_values_episode)}")
+            print(f"Height penalty weight: {height_penalty_weight}")
             print()
-            print(f"{'Step':>4} | {'Action':>6} | {'Reward':>6} | {'Penalty':>7} | {'R-Ret':>7} | {'P-Ret':>7} | {'Q-Val':>7} | {'Note'}")
-            print("-" * 90)
+            print(f"{'Step':>4} | {'Action':>6} | {'Net Reward':>10} | {'Q-Value':>8}")
+            print("-" * 50)
             action_names = ["noop", "left", "right", "rotate", "soft", "hard", "hold"]
-            for i in range(min(30, len(combined_q_values))):
-                note = ""
-                if i in episode_piece_boundaries:
-                    note = "← NEW PIECE"
+            for i in range(min(30, len(q_values_episode))):
                 action_name = action_names[episode_actions[i]]
-                print(f"{i:4d} | {action_name:>6} | {episode_step_rewards[i]:6.2f} | {episode_step_penalties[i]:7.3f} | "
-                      f"{reward_returns[i]:7.3f} | {penalty_returns[i]:7.4f} | {combined_q_values[i]:7.3f} | {note}")
+                print(f"{i:4d} | {action_name:>6} | {episode_net_rewards[i]:10.4f} | {q_values_episode[i]:8.4f}")
             print()
 
         states_empty.extend(episode_states_empty)
         states_filled.extend(episode_states_filled)
         actions.extend(episode_actions)
-        q_targets.extend(combined_q_values)
+        q_targets.extend(q_values_episode)
 
     env.close()
 
@@ -221,8 +191,8 @@ def collect_data(
     return states_empty, states_filled, actions, q_targets, episode_rewards
 
 
-def evaluate_agent(agent, n_episodes=10, penalty_per_move=0.01):
-    """Evaluate agent performance with new reward/penalty system."""
+def evaluate_agent(agent, n_episodes=10, height_penalty_weight=0.001):
+    """Evaluate agent performance with height-based penalty system."""
     env = tetris.Tetris(seed=int(time.time() * 1e6))
     n_rows = env.n_rows
     n_cols = env.n_cols
@@ -238,14 +208,24 @@ def evaluate_agent(agent, n_episodes=10, penalty_per_move=0.01):
         episode_lines = 0
 
         while not done:
-            prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
+            full_board = obs[0, :board_size].reshape(n_rows, n_cols)
+            prev_board = full_board.copy()
+            active = (full_board == 2)
+
             action = agent.choose_action(obs[0], deterministic=True)
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
 
             next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
             step_reward = extract_line_clear_reward(prev_board, next_board)
-            step_penalty = penalty_per_move if action in penalty_actions else 0.0
+
+            # Height-based penalty
+            step_penalty = 0.0
+            if action in penalty_actions and np.any(active):
+                active_rows = np.where(active)[0]
+                height_from_top = np.min(active_rows)
+                step_penalty = height_penalty_weight * height_from_top
+
             lines_cleared = count_lines_cleared(prev_board, next_board)
 
             episode_reward += step_reward - step_penalty
@@ -356,8 +336,7 @@ def train(
     val_split=0.2,
     random_action_prob=0.1,
     discount=0.99,
-    penalty_growth=1.005,
-    penalty_per_move=0.01,
+    height_penalty_weight=0.001,
     checkpoint_dir='checkpoints',
     save_frequency=1,
     debug_qvalues=False
@@ -376,9 +355,8 @@ def train(
         device: 'cpu' or 'cuda'
         val_split: Validation split ratio
         random_action_prob: Probability of forcing a random environment action
-        discount: Discount factor for reward returns (default: 0.99)
-        penalty_growth: Growth factor for penalty returns (default: 1.005)
-        penalty_per_move: Penalty per left/right/rotate action (default: 0.01)
+        discount: Discount factor for returns (default: 0.99)
+        height_penalty_weight: Penalty weight per unit height for movements (default: 0.001)
         checkpoint_dir: Directory to save checkpoints
         save_frequency: Save checkpoint every N iterations
         debug_qvalues: Print detailed Q-value computation table (default: False)
@@ -442,9 +420,8 @@ def train(
     print(f"Batch size: {batch_size}")
     print(f"Learning rate: {lr}")
     print(f"Random action prob: {random_action_prob:.2f}")
-    print(f"Reward discount: {discount:.2f}")
-    print(f"Penalty growth: {penalty_growth:.2f}")
-    print(f"Penalty per move: {penalty_per_move:.3f}")
+    print(f"Discount factor: {discount:.2f}")
+    print(f"Height penalty weight: {height_penalty_weight:.4f}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"{'='*70}\n")
 
@@ -460,8 +437,7 @@ def train(
             n_episodes=episodes_per_iter,
             random_prob=random_action_prob,
             discount=discount,
-            penalty_growth=penalty_growth,
-            penalty_per_move=penalty_per_move,
+            height_penalty_weight=height_penalty_weight,
             verbose=True,
             debug_qvalues=debug_qvalues
         )
@@ -599,11 +575,9 @@ def main():
     parser.add_argument('--val-split', type=float, default=0.2,
                         help='Validation split ratio')
     parser.add_argument('--discount', type=float, default=0.99,
-                        help='Discount factor for reward returns')
-    parser.add_argument('--penalty-growth', type=float, default=1.005,
-                        help='Growth factor for penalty returns')
-    parser.add_argument('--penalty-per-move', type=float, default=0.01,
-                        help='Penalty value for left/right/rotate actions')
+                        help='Discount factor for returns')
+    parser.add_argument('--height-penalty-weight', type=float, default=0.001,
+                        help='Penalty weight per unit height for movement actions')
 
     # Data diversity
     parser.add_argument('--random-action-prob', type=float, default=0.1,
@@ -633,8 +607,7 @@ def main():
         val_split=args.val_split,
         random_action_prob=args.random_action_prob,
         discount=args.discount,
-        penalty_growth=args.penalty_growth,
-        penalty_per_move=args.penalty_per_move,
+        height_penalty_weight=args.height_penalty_weight,
         checkpoint_dir=args.checkpoint_dir,
         save_frequency=args.save_frequency,
         debug_qvalues=args.debug_qvalues
