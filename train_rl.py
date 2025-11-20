@@ -349,7 +349,6 @@ def train_rl(
         episode_reward = 0
         episode_shaped_reward = 0
         steps = 0
-        prev_lines_cleared = 0
 
         # Play episode
         model.train()
@@ -362,13 +361,18 @@ def train_rl(
             obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
 
-            # Check if lines were cleared
-            current_lines = 0
-            if isinstance(info, list) and len(info) > 0 and isinstance(info[0], dict):
-                current_lines = info[0].get('lines_cleared', 0)
-
-            lines_just_cleared = max(0, current_lines - prev_lines_cleared)
-            prev_lines_cleared = current_lines
+            # Infer lines cleared from reward
+            step_reward = round(reward[0], 2)
+            if step_reward >= 0.99:
+                lines_just_cleared = 4
+            elif step_reward >= 0.49:
+                lines_just_cleared = 3
+            elif step_reward >= 0.29:
+                lines_just_cleared = 2
+            elif step_reward >= 0.09:
+                lines_just_cleared = 1
+            else:
+                lines_just_cleared = 0
 
             # Apply reward shaping: bonus for line clears, propagated backwards
             shaped_reward = reward[0]

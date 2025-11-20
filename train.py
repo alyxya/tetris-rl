@@ -149,9 +149,15 @@ def evaluate_agent(agent, n_episodes=10):
                 step_reward = 0.0
             episode_reward += step_reward
 
-            # Track lines cleared (info is a list, one per env)
-            if isinstance(info, list) and len(info) > 0:
-                episode_lines = info[0].get('lines_cleared', 0) if isinstance(info[0], dict) else 0
+            # Track lines cleared by inferring from reward
+            if step_reward >= 0.99:
+                episode_lines += 4
+            elif step_reward >= 0.49:
+                episode_lines += 3
+            elif step_reward >= 0.29:
+                episode_lines += 2
+            elif step_reward >= 0.09:
+                episode_lines += 1
 
         total_rewards.append(episode_reward)
         total_lines.append(episode_lines)
