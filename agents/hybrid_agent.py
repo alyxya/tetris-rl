@@ -23,7 +23,16 @@ from agents.heuristic_agent import HeuristicAgent
 class HybridAgent(BaseTetrisAgent):
     """Agent that randomly chooses between Student (Q-value), Teacher (Heuristic), and Random policies."""
 
-    def __init__(self, n_rows=20, n_cols=10, device='cpu', model_path=None, student_probability=0.5, random_probability=0.0):
+    def __init__(
+        self,
+        n_rows=20,
+        n_cols=10,
+        device='cpu',
+        model_path=None,
+        student_probability=0.5,
+        random_probability=0.0,
+        student_temperature=None,
+    ):
         """
         Initialize hybrid agent with student, teacher, and random sub-agents.
 
@@ -38,7 +47,13 @@ class HybridAgent(BaseTetrisAgent):
         super().__init__(n_rows, n_cols)
 
         # Initialize both sub-agents
-        self.student_agent = QValueAgent(n_rows, n_cols, device, model_path)
+        self.student_agent = QValueAgent(
+            n_rows,
+            n_cols,
+            device,
+            model_path,
+            temperature=student_temperature,
+        )
         self.teacher_agent = HeuristicAgent(n_rows, n_cols)
 
         # Store probabilities

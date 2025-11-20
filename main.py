@@ -93,6 +93,8 @@ def main():
                         help='For hybrid agent: probability of using student (default: 0.5)')
     parser.add_argument('--random-probability', type=float, default=0.0,
                         help='For hybrid agent: probability of using random action (default: 0.0)')
+    parser.add_argument('--temperature', type=float, default=None,
+                        help='Softmax sampling temperature for the value agent (default: greedy)')
     parser.add_argument('--debug-values', action='store_true',
                         help='Print predicted Q-values for each action (Q agent only)')
 
@@ -107,7 +109,7 @@ def main():
         print(f"Running HeuristicAgent for {args.episodes} episode(s)...")
         print("The agent evaluates all rotations and horizontal placements.")
     elif args.agent in ('q', 'cnn', 'value'):
-        agent = QValueAgent(model_path=args.model_path)
+        agent = QValueAgent(model_path=args.model_path, temperature=args.temperature)
         print(f"Running QValueAgent for {args.episodes} episode(s)...")
         if args.model_path:
             print(f"Loaded model from {args.model_path}")
@@ -117,7 +119,8 @@ def main():
         agent = HybridAgent(
             model_path=args.model_path,
             student_probability=args.student_probability,
-            random_probability=args.random_probability
+            random_probability=args.random_probability,
+            student_temperature=args.temperature,
         )
         print(f"Running HybridAgent for {args.episodes} episode(s)...")
         teacher_prob = 1.0 - args.student_probability - args.random_probability

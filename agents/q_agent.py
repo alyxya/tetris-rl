@@ -70,11 +70,12 @@ class TetrisQNetwork(nn.Module):
 class QValueAgent(BaseTetrisAgent):
     """Agent wrapper that exposes the unified Q-network with helper methods."""
 
-    def __init__(self, n_rows=20, n_cols=10, device='cpu', model_path=None):
+    def __init__(self, n_rows=20, n_cols=10, device='cpu', model_path=None, temperature=None):
         super().__init__(n_rows, n_cols)
 
         self.device = torch.device(device)
         self.model = TetrisQNetwork(n_rows, n_cols, n_actions=7).to(self.device)
+        self.temperature = temperature
 
         if model_path is not None:
             self.load_model(model_path)
@@ -100,13 +101,30 @@ class QValueAgent(BaseTetrisAgent):
             values = self.model(board_empty, board_filled)
         return values.squeeze(0).cpu().numpy()
 
-    def choose_action(self, obs, epsilon=0.0, deterministic=False):
-        """Epsilon-greedy or greedy action selection using predicted Q-values."""
+    def choose_action(self, obs, epsilon=0.0, deterministic=False, temperature=None):
+        """Epsilon-greedy or (soft) greedy action selection using predicted Q-values."""
         if not deterministic and np.random.random() < epsilon:
             return np.random.randint(0, 7)
 
         values = self.get_action_values(obs)
+
+        # Softmax sampling when a temperature is provided (either per-call or per-agent)
+        temp = self.temperature if temperature is None else temperature
+        if not deterministic and temp is not None and temp > 0:
+            return self._softmax_sample(values, temp)
+
         return int(np.argmax(values))
+
+    @staticmethod
+    def _softmax_sample(values, temperature):
+        scaled = values / max(temperature, 1e-6)
+        scaled -= np.max(scaled)
+        probs = np.exp(scaled)
+        probs_sum = probs.sum()
+        if probs_sum <= 0 or np.isnan(probs_sum):
+            return int(np.argmax(values))
+        probs /= probs_sum
+        return int(np.random.choice(len(values), p=probs))
 
     def save_model(self, path):
         """Persist model weights to disk."""
