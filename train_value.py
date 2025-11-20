@@ -55,15 +55,16 @@ class TetrisValueDataset(Dataset):
         )
 
 
-def collect_data(teacher_agent, student_agent=None, n_episodes=10, student_mix=0.0, gamma=0.95, verbose=True):
+def collect_data(teacher_agent, student_agent=None, n_episodes=10, student_mix=0.0, random_mix=0.0, gamma=0.95, verbose=True):
     """
-    Collect training data using mix of teacher and student agents.
+    Collect training data using mix of teacher, student, and random agents.
 
     Args:
         teacher_agent: Teacher agent (e.g., HeuristicAgent) that provides action labels
         student_agent: Student agent (ValueAgent) that can also act (optional)
         n_episodes: Number of episodes to collect
-        student_mix: Probability of using student's action vs teacher's action (0.0 = pure teacher, 1.0 = pure student)
+        student_mix: Probability of using student's action (default: 0.0)
+        random_mix: Probability of using random action (default: 0.0)
         gamma: Discount factor for computing discounted return-to-go (default: 0.95)
         verbose: Print progress
 
@@ -75,9 +76,12 @@ def collect_data(teacher_agent, student_agent=None, n_episodes=10, student_mix=0
         episode_rewards: list of episode total rewards
 
     Note:
-        When student_mix > 0, student acts in environment with probability student_mix,
-        but teacher's action is still used as the label for learning. This allows the
-        student to explore states it would visit while still learning from teacher's policy.
+        Action execution probabilities:
+        - student_mix: use student agent
+        - random_mix: use random action (uniform over 7 actions)
+        - 1 - student_mix - random_mix: use teacher agent
+
+        Teacher's action is always used as the label for learning.
     """
     env = tetris.Tetris()
 
@@ -88,10 +92,9 @@ def collect_data(teacher_agent, student_agent=None, n_episodes=10, student_mix=0
     episode_rewards = []
 
     if verbose:
-        if student_mix > 0 and student_agent is not None:
-            print(f"Collecting data from {n_episodes} episodes (gamma={gamma}, student_mix={student_mix:.2f})...")
-        else:
-            print(f"Collecting data from {n_episodes} episodes (gamma={gamma})...")
+        teacher_mix = 1.0 - student_mix - random_mix
+        print(f"Collecting data from {n_episodes} episodes (gamma={gamma})...")
+        print(f"  Action mix: teacher={teacher_mix:.2f}, student={student_mix:.2f}, random={random_mix:.2f}")
 
     for episode in tqdm(range(n_episodes), disable=not verbose):
         obs, _ = env.reset()
@@ -120,9 +123,13 @@ def collect_data(teacher_agent, student_agent=None, n_episodes=10, student_mix=0
             teacher_action = teacher_agent.choose_action(obs[0])
 
             # Decide which action to actually execute in environment
-            if student_agent is not None and np.random.random() < student_mix:
-                # Student acts (for exploration/on-policy data)
+            rand = np.random.random()
+            if rand < student_mix and student_agent is not None:
+                # Student acts
                 action_to_execute = student_agent.choose_action(obs[0], deterministic=False)
+            elif rand < student_mix + random_mix:
+                # Random action (uniform over 7 actions)
+                action_to_execute = np.random.randint(0, 7)
             else:
                 # Teacher acts
                 action_to_execute = teacher_action
@@ -283,6 +290,8 @@ def train(
     gamma=0.95,
     initial_student_mix=0.0,
     final_student_mix=0.5,
+    initial_random_mix=0.0,
+    final_random_mix=0.0,
     checkpoint=None,
     n_iterations=10,
     episodes_per_iter=20,
@@ -295,13 +304,15 @@ def train(
     save_frequency=1
 ):
     """
-    Main training loop with optional student exploration.
+    Main training loop with optional student and random exploration.
 
     Args:
         teacher_type: Type of teacher agent ('heuristic' is default)
         gamma: Discount factor for computing discounted return-to-go (default: 0.95)
-        initial_student_mix: Initial probability of student acting (default: 0.0 = pure teacher)
-        final_student_mix: Final probability of student acting (default: 0.5 = 50/50 mix)
+        initial_student_mix: Initial probability of student acting (default: 0.0)
+        final_student_mix: Final probability of student acting (default: 0.5)
+        initial_random_mix: Initial probability of random acting (default: 0.0)
+        final_random_mix: Final probability of random acting (default: 0.0)
         checkpoint: Path to checkpoint to resume from (None = start from scratch)
         n_iterations: Number of data collection iterations
         episodes_per_iter: Episodes to collect per iteration
@@ -314,11 +325,12 @@ def train(
         save_frequency: Save checkpoint every N iterations
 
     Note:
-        student_mix controls how much the student (value agent) explores vs follows teacher.
-        It linearly increases from initial_student_mix to final_student_mix over iterations.
-        - 0.0: Pure teacher demonstrations (no exploration)
-        - 0.5: 50/50 mix of student and teacher actions
-        - 1.0: Pure student exploration (teacher only labels)
+        Action execution probabilities (linearly scheduled over iterations):
+        - student_mix: use student (value agent) action
+        - random_mix: use random action (uniform over 7 actions)
+        - 1 - student_mix - random_mix: use teacher (heuristic) action
+
+        Teacher's action is always used as the label for learning.
     """
     device = torch.device(device)
 
@@ -383,21 +395,23 @@ def train(
 
     # Main training loop
     for iteration in range(start_iteration, n_iterations):
-        # Calculate student_mix for this iteration (linear schedule)
-        student_mix = initial_student_mix + (final_student_mix - initial_student_mix) * (
-            iteration / max(n_iterations - 1, 1)
-        )
+        # Calculate student_mix and random_mix for this iteration (linear schedule)
+        progress = iteration / max(n_iterations - 1, 1)
+        student_mix = initial_student_mix + (final_student_mix - initial_student_mix) * progress
+        random_mix = initial_random_mix + (final_random_mix - initial_random_mix) * progress
 
         print(f"\n{'='*70}")
-        print(f"Iteration {iteration + 1}/{n_iterations} (student_mix={student_mix:.2f})")
+        print(f"Iteration {iteration + 1}/{n_iterations}")
+        print(f"  student_mix={student_mix:.2f}, random_mix={random_mix:.2f}, teacher_mix={1-student_mix-random_mix:.2f}")
         print(f"{'='*70}")
 
-        # Collect data with student/teacher mix
+        # Collect data with student/teacher/random mix
         states_empty, states_filled, actions, rewards, episode_rewards = collect_data(
             teacher_agent,
             student_agent=value_agent,
             n_episodes=episodes_per_iter,
             student_mix=student_mix,
+            random_mix=random_mix,
             gamma=gamma,
             verbose=True
         )
@@ -513,10 +527,14 @@ def main():
                         help='Teacher agent type (default: heuristic)')
     parser.add_argument('--gamma', type=float, default=0.95,
                         help='Discount factor for return-to-go (default: 0.95)')
-    parser.add_argument('--initial-student-mix', type=float, default=0.5,
-                        help='Initial probability of student acting vs teacher (default: 0.5)')
+    parser.add_argument('--initial-student-mix', type=float, default=0.0,
+                        help='Initial probability of student acting (default: 0.0)')
     parser.add_argument('--final-student-mix', type=float, default=0.0,
-                        help='Final probability of student acting vs teacher (default: 0.0)')
+                        help='Final probability of student acting (default: 0.0)')
+    parser.add_argument('--initial-random-mix', type=float, default=0.5,
+                        help='Initial probability of random acting (default: 0.5)')
+    parser.add_argument('--final-random-mix', type=float, default=0.0,
+                        help='Final probability of random acting (default: 0.0)')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='Path to checkpoint to resume from')
     parser.add_argument('--device', type=str, default='cpu',
@@ -552,6 +570,8 @@ def main():
         gamma=args.gamma,
         initial_student_mix=args.initial_student_mix,
         final_student_mix=args.final_student_mix,
+        initial_random_mix=args.initial_random_mix,
+        final_random_mix=args.final_random_mix,
         checkpoint=args.checkpoint,
         n_iterations=args.iterations,
         episodes_per_iter=args.episodes,
