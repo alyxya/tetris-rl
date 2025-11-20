@@ -161,6 +161,9 @@ def collect_data(
 def evaluate_agent(agent, n_episodes=10):
     """Evaluate agent performance."""
     env = tetris.Tetris(seed=int(time.time() * 1e6))
+    n_rows = env.n_rows
+    n_cols = env.n_cols
+    board_size = n_rows * n_cols
     total_rewards = []
     total_lines = []
 
