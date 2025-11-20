@@ -59,7 +59,7 @@ The exploration probability (how often the teacher action is taken) decays from 
 - `--iterations`: Number of data collection iterations (default: `10`)
 - `--episodes`: Episodes per iteration (default: `20`)
 - `--epochs`: Training epochs per iteration (default: `10`)
-- `--device`: `cpu` or `cuda` (default: `cpu`)
+- `--device`: `cpu`, `cuda`, or `mps` (default: `cpu`)
 - `--random-action-prob`: Probability of forcing random actions during data collection (default: `0.1`)
 - `--save-frequency`: Save checkpoint every N iterations (default: `1`)
 

@@ -29,7 +29,7 @@ Teacher usage decays from `--initial-exploration` to `--final-exploration`, whil
 ### Model and Training
 - `--teacher`: Teacher agent type (default `heuristic`)
 - `--checkpoint`: Resume from checkpoint file
-- `--device`: `cpu` or `cuda`
+- `--device`: `cpu`, `cuda`, or `mps`
 
 ### Training Schedule
 - `--iterations`: Data collection iterations (default `10`)
@@ -101,7 +101,7 @@ python train_rl.py --checkpoint checkpoints_rl/episode_0500.pt --episodes 1000
 - `--model-path`: Optional supervised weights to bootstrap from
 - `--checkpoint`: Resume RL training
 - `--episodes`: Number of RL episodes (default `500`)
-- `--device`: `cpu` or `cuda`
+- `--device`: `cpu`, `cuda`, or `mps`
 - `--batch-size`: TD batch size (default `128`)
 - `--buffer-size`: Replay buffer capacity (default `100000`)
 - `--min-buffer`: Samples required before updates (default `2000`)
