@@ -3,20 +3,21 @@ Main script for running Tetris agents.
 
 Usage examples:
     python main.py --agent heuristic [--episodes 1] [--render]
-    python main.py --agent q --model-path models/q_value_agent.pt [--episodes 1] [--render]
-    python main.py --agent hybrid --model-path models/q_value_agent.pt [--episodes 1]
-
-`--agent` accepts aliases: `q`, `cnn`, or `value` all route to the unified Q-value agent.
+    python main.py --agent policy --model-path models/policy.pt [--episodes 1]
+    python main.py --agent value --model-path models/value.pt [--episodes 1]
+    python main.py --agent hybrid --agents heuristic,policy --probs 0.5,0.5 [--episodes 1]
 """
 
 import argparse
 import time
 from pufferlib.ocean.tetris import tetris
-from agents import HeuristicAgent, QValueAgent, HybridAgent
-from utils.rewards import extract_line_clear_reward
+from heuristic_agent import HeuristicAgent
+from policy_agent import PolicyAgent
+from value_agent import ValueAgent
+from hybrid_agent import HybridAgent
 
 
-def run_episode(env, agent, render=False, verbose=True, debug_values=False):
+def run_episode(env, agent, render=False, verbose=True):
     """
     Run a single episode with the given agent.
 
@@ -25,16 +26,12 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
         agent: Agent to use
         render: Whether to render the game
         verbose: Whether to print progress
-        debug_values: Whether to print predicted values (Q-value agent only)
 
     Returns:
         steps: Number of steps taken
-        total_reward: Total reward achieved
+        total_reward: Total reward from environment
     """
-    obs, _ = env.reset(seed=int(time.time() * 1e6))
-    n_rows = env.n_rows
-    n_cols = env.n_cols
-    board_size = n_rows * n_cols
+    obs, _ = env.reset()
     agent.reset()
 
     done = False
@@ -42,28 +39,16 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
     steps = 0
 
     while not done:
-        # Get action (with optional debug output for Q-value agent)
-        if debug_values and hasattr(agent, 'get_action_values'):
-            values = agent.get_action_values(obs[0])
-            action = agent.choose_action(obs[0])
-            print(f"Step {steps}: Values={values.round(3)}, Best action={action} (value={values[action]:.3f})")
-        else:
-            action = agent.choose_action(obs[0])
-
-        prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
-        next_obs, reward, terminated, truncated, info = env.step([action])
+        # Extract observation from batch (env returns batched obs)
+        obs_single = obs[0] if len(obs.shape) > 1 else obs
+        action = agent.choose_action(obs_single)
+        next_obs, reward, terminated, truncated, _ = env.step([action])
         done = terminated[0] or truncated[0]
 
         if render:
             env.render()
 
-        # Extract line clear rewards only (matching train.py evaluation)
-        # Skip reward calculation on terminal states to avoid false line clear detection
-        if not done:
-            next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-            step_reward = extract_line_clear_reward(prev_board, next_board)
-            total_reward += step_reward
-
+        total_reward += reward[0] if hasattr(reward, '__getitem__') else reward
         steps += 1
         obs = next_obs
 
@@ -76,25 +61,39 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Run Tetris agents')
-    parser.add_argument('--agent', type=str, default='heuristic',
-                        choices=['heuristic', 'q', 'cnn', 'value', 'hybrid'],
-                        help='Agent type to use (cnn/value are aliases for q)')
+    parser.add_argument('--agent', type=str, required=True,
+                        choices=['heuristic', 'policy', 'value', 'hybrid'],
+                        help='Agent type to use')
     parser.add_argument('--model-path', type=str, default=None,
-                        help='Path to Q-value model weights (for q/cnn/value/hybrid agents)')
+                        help='Path to model weights (for policy/value agents)')
     parser.add_argument('--episodes', type=int, default=1,
                         help='Number of episodes to run')
     parser.add_argument('--render', action='store_true',
                         help='Render the game (warning: slow)')
     parser.add_argument('--verbose', action='store_true', default=True,
                         help='Print progress during episodes')
-    parser.add_argument('--student-probability', type=float, default=0.5,
-                        help='For hybrid agent: probability of using student (default: 0.5)')
-    parser.add_argument('--random-probability', type=float, default=0.0,
-                        help='For hybrid agent: probability of using random action (default: 0.0)')
-    parser.add_argument('--temperature', type=float, default=None,
-                        help='Softmax sampling temperature for the value agent (default: greedy)')
-    parser.add_argument('--debug-values', action='store_true',
-                        help='Print predicted Q-values for each action (Q agent only)')
+    parser.add_argument('--device', type=str, default='cpu',
+                        help='Device for neural networks (cpu or cuda)')
+
+    # Policy agent options
+    parser.add_argument('--deterministic', action='store_true',
+                        help='Use deterministic policy (argmax) instead of sampling')
+    parser.add_argument('--temperature', type=float, default=1.0,
+                        help='Sampling temperature for policy agent')
+
+    # Value agent options
+    parser.add_argument('--epsilon', type=float, default=0.0,
+                        help='Exploration epsilon for value agent')
+
+    # Hybrid agent options
+    parser.add_argument('--agents', type=str, default=None,
+                        help='Comma-separated list of agents for hybrid (e.g., heuristic,policy,random)')
+    parser.add_argument('--probs', type=str, default=None,
+                        help='Comma-separated probabilities for hybrid agents (must sum to 1.0)')
+    parser.add_argument('--policy-model', type=str, default=None,
+                        help='Model path for policy agent in hybrid')
+    parser.add_argument('--value-model', type=str, default=None,
+                        help='Model path for value agent in hybrid')
 
     args = parser.parse_args()
 
@@ -105,28 +104,59 @@ def main():
     if args.agent == 'heuristic':
         agent = HeuristicAgent()
         print(f"Running HeuristicAgent for {args.episodes} episode(s)...")
-        print("The agent evaluates all rotations and horizontal placements.")
-    elif args.agent in ('q', 'cnn', 'value'):
-        agent = QValueAgent(model_path=args.model_path, temperature=args.temperature)
-        print(f"Running QValueAgent for {args.episodes} episode(s)...")
+
+    elif args.agent == 'policy':
+        if not args.model_path:
+            print("Warning: No model path provided, using randomly initialized model")
+        agent = PolicyAgent(device=args.device, model_path=args.model_path)
+        print(f"Running PolicyAgent for {args.episodes} episode(s)...")
         if args.model_path:
             print(f"Loaded model from {args.model_path}")
-        else:
-            print("Using randomly initialized model")
-    elif args.agent == 'hybrid':
-        agent = HybridAgent(
-            model_path=args.model_path,
-            student_probability=args.student_probability,
-            random_probability=args.random_probability,
-            student_temperature=args.temperature,
-        )
-        print(f"Running HybridAgent for {args.episodes} episode(s)...")
-        teacher_prob = 1.0 - args.student_probability - args.random_probability
-        print(f"  Student: {args.student_probability:.1%}, Random: {args.random_probability:.1%}, Teacher: {teacher_prob:.1%}")
+
+    elif args.agent == 'value':
+        if not args.model_path:
+            print("Warning: No model path provided, using randomly initialized model")
+        agent = ValueAgent(device=args.device, model_path=args.model_path)
+        print(f"Running ValueAgent for {args.episodes} episode(s)...")
         if args.model_path:
-            print(f"Loaded student model from {args.model_path}")
-        else:
-            print("Using randomly initialized student model")
+            print(f"Loaded model from {args.model_path}")
+
+    elif args.agent == 'hybrid':
+        if not args.agents or not args.probs:
+            raise ValueError("Hybrid agent requires --agents and --probs arguments")
+
+        # Parse agents and probabilities
+        agent_names = [a.strip() for a in args.agents.split(',')]
+        probs = [float(p.strip()) for p in args.probs.split(',')]
+
+        if len(agent_names) != len(probs):
+            raise ValueError("Number of agents must match number of probabilities")
+
+        # Create sub-agents
+        sub_agents = []
+        for name in agent_names:
+            if name == 'random':
+                sub_agents.append('random')
+            elif name == 'heuristic':
+                sub_agents.append(HeuristicAgent())
+            elif name == 'policy':
+                model_path = args.policy_model or args.model_path
+                if not model_path:
+                    print("Warning: No model path for policy agent in hybrid")
+                sub_agents.append(PolicyAgent(device=args.device, model_path=model_path))
+            elif name == 'value':
+                model_path = args.value_model or args.model_path
+                if not model_path:
+                    print("Warning: No model path for value agent in hybrid")
+                sub_agents.append(ValueAgent(device=args.device, model_path=model_path))
+            else:
+                raise ValueError(f"Unknown agent type: {name}")
+
+        agent = HybridAgent(sub_agents, probs)
+        print(f"Running HybridAgent for {args.episodes} episode(s)...")
+        print(f"  Agents: {agent_names}")
+        print(f"  Probabilities: {probs}")
+
     else:
         raise ValueError(f"Unknown agent: {args.agent}")
 
@@ -138,7 +168,27 @@ def main():
         if args.episodes > 1:
             print(f"\n=== Episode {episode + 1}/{args.episodes} ===")
 
-        steps, reward = run_episode(env, agent, render=args.render, verbose=args.verbose, debug_values=args.debug_values)
+        # Special handling for policy agent parameters
+        if args.agent == 'policy':
+            def choose_action_wrapper(obs):
+                return agent.choose_action(obs,
+                                         deterministic=args.deterministic,
+                                         temperature=args.temperature)
+            original_choose = agent.choose_action
+            agent.choose_action = choose_action_wrapper
+
+        # Special handling for value agent parameters
+        if args.agent == 'value':
+            def choose_action_wrapper(obs):
+                return agent.choose_action(obs, epsilon=args.epsilon)
+            original_choose = agent.choose_action
+            agent.choose_action = choose_action_wrapper
+
+        steps, reward = run_episode(env, agent, render=args.render, verbose=args.verbose)
+
+        # Restore original methods
+        if args.agent in ['policy', 'value']:
+            agent.choose_action = original_choose
 
         all_steps.append(steps)
         all_rewards.append(reward)
@@ -148,9 +198,8 @@ def main():
         # Print usage stats for hybrid agent
         if args.agent == 'hybrid':
             stats = agent.get_usage_stats()
-            print(f"  Student: {stats['student_count']} times ({stats['student_percentage']:.1f}%)")
-            print(f"  Random: {stats['random_count']} times ({stats['random_percentage']:.1f}%)")
-            print(f"  Teacher: {stats['teacher_count']} times ({stats['teacher_percentage']:.1f}%)")
+            for name, percentage in stats.items():
+                print(f"  {name}: {percentage:.1%}")
 
     # Print summary
     if args.episodes > 1:

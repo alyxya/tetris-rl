@@ -1,402 +1,355 @@
 """
-Q-learning fine-tuning for the unified Tetris Q-value agent.
+Reinforcement learning for Tetris agents.
 
-Workflow:
-1. Start from a supervised-pretrained model (optional but recommended)
-2. Continue training with TD learning using the same line-clear shaped rewards
+Two training modes:
+1. Value network: Q-learning with heuristic rewards
+2. Policy network: REINFORCE with heuristic auxiliary rewards
 """
 
 import argparse
-import os
-import random
-import time
-from collections import deque
-
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.optim as optim
 import torch.nn.functional as F
-
+from collections import deque
+from tqdm import tqdm
 from pufferlib.ocean.tetris import tetris
-from agents.q_agent import TetrisQNetwork
-from utils.rewards import extract_line_clear_reward, count_lines_cleared
 
-
-def extract_boards(obs_flat, n_rows, n_cols):
-    """Convert flattened env observation into (board_empty, board_filled)."""
-    board = obs_flat[: n_rows * n_cols].reshape(n_rows, n_cols)
-    locked = (board == 1).astype(np.float32)
-    active = (board == 2)
-
-    board_empty = locked
-    board_filled = locked.copy()
-    board_filled[active] = 1.0
-    return board_empty, board_filled
+from model import PolicyNetwork, ValueNetwork
+from value_agent import ValueAgent
+from policy_agent import PolicyAgent
+import heuristic as heuristic_module
 
 
 class ReplayBuffer:
-    """Simple FIFO replay buffer for experience replay."""
+    """Fixed-size replay buffer for experience replay."""
 
     def __init__(self, capacity):
-        self.capacity = capacity
         self.buffer = deque(maxlen=capacity)
+
+    def push(self, state_empty, state_filled, action, reward, next_empty, next_filled, done):
+        """Add experience to buffer."""
+        self.buffer.append((state_empty, state_filled, action, reward, next_empty, next_filled, done))
+
+    def sample(self, batch_size):
+        """Sample random batch from buffer."""
+        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+        batch = [self.buffer[i] for i in indices]
+
+        states_empty = np.array([x[0] for x in batch])
+        states_filled = np.array([x[1] for x in batch])
+        actions = np.array([x[2] for x in batch])
+        rewards = np.array([x[3] for x in batch])
+        next_empty = np.array([x[4] for x in batch])
+        next_filled = np.array([x[5] for x in batch])
+        dones = np.array([x[6] for x in batch])
+
+        return states_empty, states_filled, actions, rewards, next_empty, next_filled, dones
 
     def __len__(self):
         return len(self.buffer)
 
-    def push(self, transition):
-        self.buffer.append(transition)
 
-    def sample(self, batch_size):
-        batch = random.sample(self.buffer, batch_size)
-        state_e, state_f, actions, rewards, next_e, next_f, dones = zip(*batch)
-        return (
-            np.stack(state_e),
-            np.stack(state_f),
-            np.array(actions, dtype=np.int64),
-            np.array(rewards, dtype=np.float32),
-            np.stack(next_e),
-            np.stack(next_f),
-            np.array(dones, dtype=np.float32),
-        )
+def compute_heuristic_reward(locked_board, active_piece):
+    """Compute heuristic-based reward for current state."""
+    piece_shape = extract_piece_shape_from_board(active_piece)
+    if piece_shape is None:
+        return 0.0
+
+    # Find best placement and use its score as reward
+    _, _, score = heuristic_module.find_best_placement(locked_board, piece_shape)
+    return score
 
 
-class QLearningTrainer:
-    """Encapsulates optimization logic for Q-learning with target network."""
+def extract_piece_shape_from_board(active_piece):
+    """Extract piece shape from active piece board."""
+    piece_positions = np.argwhere(active_piece > 0)
+    if len(piece_positions) == 0:
+        return None
 
-    def __init__(
-        self,
-        model,
-        device,
-        lr=1e-4,
-        gamma=0.99,
-        buffer_size=100000,
-        min_buffer=2000,
-    ):
-        self.model = model
-        self.target_model = TetrisQNetwork().to(device)
-        self.target_model.load_state_dict(model.state_dict())
-        self.device = device
-        self.gamma = gamma
-        self.replay_buffer = ReplayBuffer(buffer_size)
-        self.min_buffer = min_buffer
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-        self.global_step = 0
-
-    def select_action(self, board_empty, board_filled, epsilon):
-        """Epsilon-greedy action selection using current Q-values."""
-        if np.random.random() < epsilon:
-            return np.random.randint(0, 7)
-
-        board_empty_t = torch.FloatTensor(board_empty).unsqueeze(0).unsqueeze(0).to(self.device)
-        board_filled_t = torch.FloatTensor(board_filled).unsqueeze(0).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            values = self.model(board_empty_t, board_filled_t)
-        return int(values.argmax(dim=1).item())
-
-    def store(self, transition):
-        self.replay_buffer.push(transition)
-
-    def update_target(self):
-        self.target_model.load_state_dict(self.model.state_dict())
-
-    def optimize(self, batch_size):
-        """Run one TD update if enough samples are available."""
-        if len(self.replay_buffer) < self.min_buffer:
-            return None
-
-        state_e, state_f, actions, rewards, next_e, next_f, dones = self.replay_buffer.sample(batch_size)
-
-        state_e = torch.FloatTensor(state_e).unsqueeze(1).to(self.device)
-        state_f = torch.FloatTensor(state_f).unsqueeze(1).to(self.device)
-        next_e = torch.FloatTensor(next_e).unsqueeze(1).to(self.device)
-        next_f = torch.FloatTensor(next_f).unsqueeze(1).to(self.device)
-        actions = torch.LongTensor(actions).unsqueeze(1).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
-        dones = torch.FloatTensor(dones).to(self.device)
-
-        q_values = self.model(state_e, state_f)
-        state_action_values = q_values.gather(1, actions).squeeze(1)
-
-        with torch.no_grad():
-            next_q_values = self.target_model(next_e, next_f).max(1)[0]
-            targets = rewards + self.gamma * (1.0 - dones) * next_q_values
-
-        loss = F.mse_loss(state_action_values, targets)
-
-        self.optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-        self.optimizer.step()
-
-        self.global_step += 1
-        return loss.item()
+    min_row, min_col = piece_positions.min(axis=0)
+    max_row, max_col = piece_positions.max(axis=0)
+    piece_shape = active_piece[min_row:max_row+1, min_col:max_col+1]
+    return piece_shape
 
 
-def evaluate_model(model, device, n_episodes=10, height_penalty_weight=0.0002):
-    """Run greedy episodes to gauge performance with height-based penalty system."""
-    env = tetris.Tetris(seed=int(time.time() * 1e6))
-    n_rows = env.n_rows
-    n_cols = env.n_cols
-    board_size = n_rows * n_cols
-    rewards = []
-    lines_cleared_list = []
-    penalty_actions = {1, 2, 3}
+def train_value_rl(args):
+    """Train value network with Q-learning."""
+    print("Training Value Network with Q-Learning")
+    print("=" * 50)
 
-    for _ in range(n_episodes):
-        obs, _ = env.reset(seed=int(time.time() * 1e6))
-        done = False
-        total_reward = 0.0
-        total_lines = 0
+    device = torch.device(args.device)
+    env = tetris.Tetris(seed=42)
 
-        while not done:
-            board_empty, board_filled = extract_boards(obs[0], n_rows, n_cols)
-            full_board = obs[0, :board_size].reshape(n_rows, n_cols)
-            prev_board = full_board.copy()
-            active = (full_board == 2)
+    # Create online and target networks
+    online_net = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
+    target_net = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
 
-            board_empty_t = torch.FloatTensor(board_empty).unsqueeze(0).unsqueeze(0).to(device)
-            board_filled_t = torch.FloatTensor(board_filled).unsqueeze(0).unsqueeze(0).to(device)
-            with torch.no_grad():
-                action = model(board_empty_t, board_filled_t).argmax(dim=1).item()
-
-            next_obs, reward, terminated, truncated, info = env.step([action])
-            done = terminated[0] or truncated[0]
-
-            # Skip reward calculation on terminal states to avoid false line clear detection
-            if not done:
-                next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-                step_reward = extract_line_clear_reward(prev_board, next_board)
-
-                # Height-based penalty (matching train.py)
-                step_penalty = 0.0
-                if action in penalty_actions and np.any(active):
-                    active_rows = np.where(active)[0]
-                    height_from_top = np.min(active_rows)
-                    step_penalty = height_penalty_weight * (height_from_top + 1)
-
-                lines_cleared = count_lines_cleared(prev_board, next_board)
-
-                total_reward += step_reward - step_penalty
-                total_lines += lines_cleared
-
-            obs = next_obs
-
-        rewards.append(total_reward)
-        lines_cleared_list.append(total_lines)
-
-    env.close()
-    return float(np.mean(rewards)), float(np.std(rewards))
-
-
-def save_checkpoint(model, target_model, optimizer, episode, best_reward, checkpoint_dir, filename):
-    checkpoint = {
-        'model_state_dict': model.state_dict(),
-        'target_state_dict': target_model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'episode': episode,
-        'best_reward': best_reward,
-    }
-    path = os.path.join(checkpoint_dir, filename)
-    torch.save(checkpoint, path)
-    return path
-
-
-def load_checkpoint(checkpoint_path, model, target_model, optimizer, device):
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    target_model.load_state_dict(checkpoint['target_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    return checkpoint
-
-
-def train_rl(
-    model_path=None,
-    checkpoint=None,
-    n_episodes=500,
-    device='cpu',
-    batch_size=128,
-    buffer_size=100000,
-    min_buffer=2000,
-    gamma=0.99,
-    lr=1e-4,
-    epsilon_start=0.2,
-    epsilon_end=0.01,
-    epsilon_decay=0.5,
-    target_update=1000,
-    eval_frequency=25,
-    eval_episodes=5,
-    checkpoint_dir='checkpoints_rl',
-    save_frequency=50,
-    height_penalty_weight=0.0002,
-):
-    """Main Q-learning training loop."""
-
-    device = torch.device(device)
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    os.makedirs('models', exist_ok=True)
-
-    model = TetrisQNetwork().to(device)
-    trainer = QLearningTrainer(
-        model,
-        device,
-        lr=lr,
-        gamma=gamma,
-        buffer_size=buffer_size,
-        min_buffer=min_buffer,
-    )
-
-    start_episode = 0
-    best_reward = -float('inf')
-
-    if model_path:
-        print(f"Loading supervised weights from {model_path}")
-        state_dict = torch.load(model_path, map_location=device, weights_only=False)
-        if isinstance(state_dict, dict) and 'model_state_dict' in state_dict:
-            model.load_state_dict(state_dict['model_state_dict'])
+    # Load pretrained weights if provided
+    if args.init_model:
+        checkpoint = torch.load(args.init_model, map_location=device, weights_only=False)
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            online_net.load_state_dict(checkpoint['model_state_dict'])
         else:
-            model.load_state_dict(state_dict)
-        trainer.update_target()
+            online_net.load_state_dict(checkpoint)
+        print(f"Loaded initial weights from {args.init_model}")
 
-    if checkpoint:
-        print(f"Resuming from checkpoint {checkpoint}")
-        ckpt = load_checkpoint(checkpoint, model, trainer.target_model, trainer.optimizer, device)
-        start_episode = ckpt.get('episode', 0) + 1
-        best_reward = ckpt.get('best_reward', -float('inf'))
+    target_net.load_state_dict(online_net.state_dict())
+    target_net.eval()
 
-    env = tetris.Tetris(seed=int(time.time() * 1e6))
-    n_rows = env.n_rows
-    n_cols = env.n_cols
-    board_size = n_rows * n_cols
-    global_step = 0
-    penalty_actions = {1, 2, 3}
+    optimizer = optim.Adam(online_net.parameters(), lr=args.lr)
+    replay_buffer = ReplayBuffer(args.buffer_size)
 
-    for episode in range(start_episode, n_episodes):
-        obs, _ = env.reset(seed=int(time.time() * 1e6))
-        board_empty, board_filled = extract_boards(obs[0], n_rows, n_cols)
+    # Training loop
+    best_reward = float('-inf')
+    epsilon = args.epsilon_start
+    epsilon_decay = (args.epsilon_start - args.epsilon_end) / args.num_episodes
+
+    agent = ValueAgent(device=args.device)
+    agent.model = online_net
+
+    for episode in tqdm(range(args.num_episodes), desc="Training"):
+        obs, _ = env.reset()
         done = False
-        episode_reward = 0.0
-
-        frac = episode / max(1, n_episodes - 1)
-        epsilon = max(epsilon_end, epsilon_start - frac * (epsilon_start - epsilon_end) * epsilon_decay)
+        total_reward = 0
+        steps = 0
 
         while not done:
-            full_board = obs[0, :board_size].reshape(n_rows, n_cols)
-            prev_board = full_board.copy()
-            active = (full_board == 2)
+            # Parse state
+            _, locked, active = agent.parse_observation(obs)
+            board_empty = locked.copy()
+            board_filled = locked.copy()
+            board_filled[active > 0] = 1.0
 
-            action = trainer.select_action(board_empty, board_filled, epsilon)
-            next_obs, reward, terminated, truncated, info = env.step([action])
-            done = terminated[0] or truncated[0]
-            next_empty, next_filled = extract_boards(next_obs[0], n_rows, n_cols)
+            # Epsilon-greedy action selection
+            action = agent.choose_action(obs, epsilon=epsilon)
 
-            # Skip reward calculation on terminal states to avoid false line clear detection
-            # Use height-based penalty system (matching train.py)
-            if not done:
-                next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-                step_reward = extract_line_clear_reward(prev_board, next_board)
+            # Take step
+            next_obs, env_reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
 
-                # Height-based penalty
-                step_penalty = 0.0
-                if action in penalty_actions and np.any(active):
-                    active_rows = np.where(active)[0]
-                    height_from_top = np.min(active_rows)
-                    step_penalty = height_penalty_weight * (height_from_top + 1)
+            # Compute heuristic reward
+            heuristic_reward = compute_heuristic_reward(locked, active)
+            reward = args.heuristic_weight * heuristic_reward + args.env_weight * env_reward
 
-                reward_value = step_reward - step_penalty
-            else:
-                reward_value = 0.0
+            # Parse next state
+            _, next_locked, next_active = agent.parse_observation(next_obs)
+            next_empty = next_locked.copy()
+            next_filled = next_locked.copy()
+            next_filled[next_active > 0] = 1.0
 
-            trainer.store((board_empty, board_filled, action, reward_value, next_empty, next_filled, float(done)))
-            loss = trainer.optimize(batch_size)
+            # Store in replay buffer
+            replay_buffer.push(board_empty, board_filled, action, reward, next_empty, next_filled, done)
 
-            board_empty, board_filled = next_empty, next_filled
-            episode_reward += reward_value
+            total_reward += reward
+            steps += 1
             obs = next_obs
-            global_step += 1
 
-            if global_step % target_update == 0:
-                trainer.update_target()
+            # Training step
+            if len(replay_buffer) >= args.batch_size:
+                # Sample batch
+                batch_empty, batch_filled, batch_actions, batch_rewards, batch_next_empty, batch_next_filled, batch_dones = replay_buffer.sample(args.batch_size)
 
-        if (episode + 1) % eval_frequency == 0:
-            mean_reward, std_reward = evaluate_model(trainer.model, device, eval_episodes, height_penalty_weight)
-            print(f"Episode {episode + 1}/{n_episodes} | Eval reward: {mean_reward:.2f} ± {std_reward:.2f}")
-            if mean_reward > best_reward:
-                best_reward = mean_reward
-                save_checkpoint(trainer.model, trainer.target_model, trainer.optimizer, episode, best_reward, checkpoint_dir, 'best.pt')
+                # Convert to tensors
+                batch_empty = torch.FloatTensor(batch_empty).unsqueeze(1).to(device)
+                batch_filled = torch.FloatTensor(batch_filled).unsqueeze(1).to(device)
+                batch_actions = torch.LongTensor(batch_actions).to(device)
+                batch_rewards = torch.FloatTensor(batch_rewards).to(device)
+                batch_next_empty = torch.FloatTensor(batch_next_empty).unsqueeze(1).to(device)
+                batch_next_filled = torch.FloatTensor(batch_next_filled).unsqueeze(1).to(device)
+                batch_dones = torch.FloatTensor(batch_dones).to(device)
 
-        if (episode + 1) % save_frequency == 0:
-            save_checkpoint(trainer.model, trainer.target_model, trainer.optimizer, episode, best_reward, checkpoint_dir, f'episode_{episode+1}.pt')
+                # Compute Q-values
+                q_values = online_net(batch_empty, batch_filled)
+                q_pred = q_values.gather(1, batch_actions.unsqueeze(1)).squeeze(1)
 
-        print(f"Episode {episode + 1}: reward={episode_reward:.2f}, epsilon={epsilon:.3f}, buffer={len(trainer.replay_buffer)}")
+                # Compute target Q-values
+                with torch.no_grad():
+                    next_q_values = target_net(batch_next_empty, batch_next_filled)
+                    next_q_max = next_q_values.max(1)[0]
+                    q_target = batch_rewards + args.gamma * next_q_max * (1 - batch_dones)
 
-    env.close()
+                # Compute loss
+                loss = F.mse_loss(q_pred, q_target)
 
-    final_path = 'models/q_value_agent_rl.pt'
-    torch.save(trainer.model.state_dict(), final_path)
-    print(f"Training complete. Final RL model saved to {final_path}")
+                # Backward pass
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(online_net.parameters(), args.grad_clip)
+                optimizer.step()
+
+        # Update target network
+        if episode % args.target_update == 0:
+            target_net.load_state_dict(online_net.state_dict())
+
+        # Decay epsilon
+        epsilon = max(args.epsilon_end, epsilon - epsilon_decay)
+
+        # Logging
+        if episode % 10 == 0:
+            print(f"\nEpisode {episode} - Steps: {steps}, Reward: {total_reward:.2f}, Epsilon: {epsilon:.3f}")
+
+        # Save best model
+        if total_reward > best_reward:
+            best_reward = total_reward
+            torch.save(online_net.state_dict(), args.output)
+            print(f"Saved best model with reward {best_reward:.2f}")
+
+    print("\nTraining complete!")
+
+
+def train_policy_rl(args):
+    """Train policy network with REINFORCE."""
+    print("Training Policy Network with REINFORCE")
+    print("=" * 50)
+
+    device = torch.device(args.device)
+    env = tetris.Tetris(seed=42)
+
+    # Create model
+    model = PolicyNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
+
+    # Load pretrained weights if provided
+    if args.init_model:
+        checkpoint = torch.load(args.init_model, map_location=device, weights_only=False)
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            model.load_state_dict(checkpoint)
+        print(f"Loaded initial weights from {args.init_model}")
+
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+    agent = PolicyAgent(device=args.device)
+    agent.model = model
+
+    best_reward = float('-inf')
+
+    for episode in tqdm(range(args.num_episodes), desc="Training"):
+        obs, _ = env.reset()
+        done = False
+
+        states_empty = []
+        states_filled = []
+        actions = []
+        rewards = []
+
+        # Collect episode
+        while not done:
+            # Parse state
+            _, locked, active = agent.parse_observation(obs)
+            board_empty = locked.copy()
+            board_filled = locked.copy()
+            board_filled[active > 0] = 1.0
+
+            states_empty.append(board_empty)
+            states_filled.append(board_filled)
+
+            # Sample action
+            action = agent.choose_action(obs, deterministic=False, temperature=args.temperature)
+            actions.append(action)
+
+            # Take step
+            next_obs, env_reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
+
+            # Compute heuristic reward
+            heuristic_reward = compute_heuristic_reward(locked, active)
+            reward = args.heuristic_weight * heuristic_reward + args.env_weight * env_reward
+            rewards.append(reward)
+
+            obs = next_obs
+
+        # Compute returns
+        returns = []
+        R = 0
+        for r in reversed(rewards):
+            R = r + args.gamma * R
+            returns.insert(0, R)
+
+        # Convert to tensors
+        states_empty = torch.FloatTensor(np.array(states_empty)).unsqueeze(1).to(device)
+        states_filled = torch.FloatTensor(np.array(states_filled)).unsqueeze(1).to(device)
+        actions = torch.LongTensor(actions).to(device)
+        returns = torch.FloatTensor(returns).to(device)
+
+        # Normalize returns
+        if len(returns) > 1:
+            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+
+        # Compute policy loss
+        logits = model(states_empty, states_filled)
+        log_probs = F.log_softmax(logits, dim=1)
+        action_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
+        policy_loss = -(action_log_probs * returns).mean()
+
+        # Backward pass
+        optimizer.zero_grad()
+        policy_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+        optimizer.step()
+
+        total_reward = sum(rewards)
+
+        # Logging
+        if episode % 10 == 0:
+            print(f"\nEpisode {episode} - Steps: {len(rewards)}, Reward: {total_reward:.2f}")
+
+        # Save best model
+        if total_reward > best_reward:
+            best_reward = total_reward
+            torch.save(model.state_dict(), args.output)
+            print(f"Saved best model with reward {best_reward:.2f}")
+
+    print("\nTraining complete!")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='RL fine-tuning for the Q-value agent (TD learning)')
-    parser.add_argument('--model-path', type=str, default=None,
-                        help='Path to supervised model weights to initialize from')
-    parser.add_argument('--checkpoint', type=str, default=None,
-                        help='Resume RL training from checkpoint')
-    parser.add_argument('--episodes', type=int, default=500,
-                        help='Number of RL episodes to run')
-    parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda', 'mps'],
-                        help='Torch device to use')
-    parser.add_argument('--batch-size', type=int, default=128,
-                        help='Batch size for TD updates')
-    parser.add_argument('--buffer-size', type=int, default=100000,
-                        help='Replay buffer capacity')
-    parser.add_argument('--min-buffer', type=int, default=2000,
-                        help='Samples required before training starts')
-    parser.add_argument('--gamma', type=float, default=0.99,
-                        help='Discount factor')
+    parser = argparse.ArgumentParser(description="RL training for Tetris")
+    parser.add_argument('--mode', type=str, required=True, choices=['value', 'policy'],
+                        help="Training mode: 'value' or 'policy'")
+    parser.add_argument('--num-episodes', type=int, default=1000,
+                        help="Number of episodes to train")
     parser.add_argument('--lr', type=float, default=1e-4,
-                        help='Learning rate')
+                        help="Learning rate")
+    parser.add_argument('--gamma', type=float, default=0.99,
+                        help="Discount factor")
+    parser.add_argument('--device', type=str, default='cpu',
+                        help="Device to use (cpu or cuda)")
+    parser.add_argument('--output', type=str, required=True,
+                        help="Output path for trained model")
+    parser.add_argument('--init-model', type=str, default=None,
+                        help="Path to pretrained model to initialize from")
+    parser.add_argument('--heuristic-weight', type=float, default=1.0,
+                        help="Weight for heuristic reward component")
+    parser.add_argument('--env-weight', type=float, default=0.0,
+                        help="Weight for environment reward component")
+    parser.add_argument('--grad-clip', type=float, default=1.0,
+                        help="Gradient clipping threshold")
+
+    # Value-specific args
+    parser.add_argument('--buffer-size', type=int, default=10000,
+                        help="Replay buffer size (value mode)")
+    parser.add_argument('--batch-size', type=int, default=64,
+                        help="Batch size (value mode)")
     parser.add_argument('--epsilon-start', type=float, default=0.2,
-                        help='Starting epsilon for exploration')
+                        help="Initial epsilon (value mode)")
     parser.add_argument('--epsilon-end', type=float, default=0.01,
-                        help='Final epsilon for exploration')
-    parser.add_argument('--epsilon-decay', type=float, default=0.5,
-                        help='Fraction of training used to decay epsilon')
-    parser.add_argument('--target-update', type=int, default=1000,
-                        help='Target network update frequency (steps)')
-    parser.add_argument('--eval-frequency', type=int, default=25,
-                        help='Evaluate model every N episodes')
-    parser.add_argument('--eval-episodes', type=int, default=5,
-                        help='Episodes per evaluation run')
-    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_rl',
-                        help='Directory for RL checkpoints')
-    parser.add_argument('--save-frequency', type=int, default=50,
-                        help='Save checkpoint every N episodes')
-    parser.add_argument('--height-penalty-weight', type=float, default=0.0002,
-                        help='Penalty weight per unit height for movement actions (matching train.py)')
+                        help="Final epsilon (value mode)")
+    parser.add_argument('--target-update', type=int, default=10,
+                        help="Target network update frequency (value mode)")
+
+    # Policy-specific args
+    parser.add_argument('--temperature', type=float, default=1.0,
+                        help="Sampling temperature (policy mode)")
 
     args = parser.parse_args()
 
-    train_rl(
-        model_path=args.model_path,
-        checkpoint=args.checkpoint,
-        n_episodes=args.episodes,
-        device=args.device,
-        batch_size=args.batch_size,
-        buffer_size=args.buffer_size,
-        min_buffer=args.min_buffer,
-        gamma=args.gamma,
-        lr=args.lr,
-        epsilon_start=args.epsilon_start,
-        epsilon_end=args.epsilon_end,
-        epsilon_decay=args.epsilon_decay,
-        target_update=args.target_update,
-        eval_frequency=args.eval_frequency,
-        eval_episodes=args.eval_episodes,
-        checkpoint_dir=args.checkpoint_dir,
-        save_frequency=args.save_frequency,
-        height_penalty_weight=args.height_penalty_weight,
-    )
+    if args.mode == 'value':
+        train_value_rl(args)
+    else:
+        train_policy_rl(args)
 
 
 if __name__ == '__main__':
