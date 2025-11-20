@@ -110,6 +110,9 @@ def collect_data(
         episode_actions = []
         episode_step_rewards = []
         episode_step_penalties = []
+        episode_piece_boundaries = []  # Track when pieces change
+
+        prev_tick = obs[0, board_size]
 
         while not done:
             # Parse observation
@@ -146,6 +149,12 @@ def collect_data(
             # Compute penalty for movement actions
             step_penalty = penalty_per_move if action_to_take in penalty_actions else 0.0
 
+            # Check if piece changed (tick resets when new piece spawns)
+            next_tick = next_obs[0, board_size]
+            if next_tick < prev_tick:
+                episode_piece_boundaries.append(len(episode_actions))
+            prev_tick = next_tick
+
             episode_reward += step_reward - step_penalty
             episode_step_rewards.append(step_reward)
             episode_step_penalties.append(step_penalty)
@@ -155,9 +164,19 @@ def collect_data(
 
         episode_rewards.append(episode_reward)
 
-        # Compute separate returns for rewards and penalties
+        # Compute reward returns (can span entire episode)
         reward_returns = compute_discounted_returns(episode_step_rewards, gamma=discount)
-        penalty_returns = compute_penalty_returns(episode_step_penalties, growth=penalty_growth)
+
+        # Compute penalty returns per piece (reset at piece boundaries)
+        penalty_returns = [0.0] * len(episode_step_penalties)
+        piece_boundaries = [0] + episode_piece_boundaries + [len(episode_step_penalties)]
+
+        for i in range(len(piece_boundaries) - 1):
+            start_idx = piece_boundaries[i]
+            end_idx = piece_boundaries[i + 1]
+            piece_penalties = episode_step_penalties[start_idx:end_idx]
+            piece_penalty_returns = compute_penalty_returns(piece_penalties, growth=penalty_growth)
+            penalty_returns[start_idx:end_idx] = piece_penalty_returns
 
         # Combined Q-value = reward_returns - penalty_returns
         combined_q_values = [r - p for r, p in zip(reward_returns, penalty_returns)]
