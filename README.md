@@ -43,14 +43,14 @@ python train.py --checkpoint checkpoints/checkpoint_iter005.pt
 
 ### How It Works
 
-The training addresses **distribution shift** by having the student (Q-value agent) collect its own data:
+The training addresses **distribution shift** by generating fresh experience every iteration:
 
-1. **Data Collection**: Student agent plays episodes while teacher (heuristic agent) labels the states
+1. **Data Collection**: Teacher agent (with occasional random actions) plays episodes and labels every state
 2. **Training**: Q-value network trains on aggregate dataset for several epochs
 3. **Evaluation**: Agent performance measured in actual gameplay
 4. **Checkpointing**: Regular checkpoints saved for resuming training
 
-The exploration probability (how often the teacher action is taken) decays from 0.9 to 0.1, allowing the student to gradually take control.
+During collection, the teacher drives almost every move while a configurable fraction of actions are random (`--random-action-prob`) to expose the model to diverse board states.
 
 ### Key Arguments
 

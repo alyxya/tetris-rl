@@ -2,7 +2,7 @@
 
 ## Overview
 
-`train.py` performs supervised pretraining for the unified Q-value agent. The student collects its own experience in the PufferLib Tetris environment while a heuristic teacher labels every state with the desired action. Random actions are occasionally injected so the dataset captures a diverse set of boards. The resulting model already ranks actions reasonably well, which makes it an ideal starting point for RL fine-tuning.
+`train.py` performs supervised pretraining for the unified Q-value agent. A heuristic teacher (with optional random perturbations) plays Tetris and labels every state with the desired action. This produces a diverse imitation dataset that already ranks actions reasonably well and serves as a strong initialization for RL fine-tuning.
 
 ## Quick Start
 
@@ -22,7 +22,7 @@ python train.py --checkpoint checkpoints/checkpoint_iter005.pt
 2. **Supervised update** – The Q-network trains with cross-entropy on aggregated `(state, action)` pairs, treating the Q-values as logits.
 3. **Evaluation & checkpointing** – After each iteration we evaluate the greedy policy, log metrics, and save checkpoints.
 
-Teacher usage decays from `--initial-exploration` to `--final-exploration`, while `--random-action-prob` controls the amount of purely random actions during data collection.
+The teacher controls every step unless the script injects a random move (probability `--random-action-prob`) to keep the dataset diverse.
 
 ## Arguments
 
@@ -41,9 +41,7 @@ Teacher usage decays from `--initial-exploration` to `--final-exploration`, whil
 - `--lr`: Learning rate (default `1e-3`)
 - `--val-split`: Validation ratio (default `0.2`)
 
-### Exploration Mix
-- `--initial-exploration`: Initial probability of executing teacher action (default `0.9`)
-- `--final-exploration`: Final probability of executing teacher action (default `0.1`)
+### Data Diversity
 - `--random-action-prob`: Probability of forcing a random action (default `0.1`)
 
 ### Checkpointing

@@ -1,9 +1,8 @@
 """
 Supervised pretraining for the unified Q-value agent using teacher supervision.
 
-The student (Q-value agent) collects data by playing, and the teacher provides
-the correct action labels. This addresses distribution shift by training on
-states the student actually encounters.
+The teacher drives gameplay (with optional random perturbations) and labels each
+state, producing a large imitation dataset across diverse board configurations.
 """
 
 import torch
@@ -41,21 +40,17 @@ class TetrisDataset(Dataset):
 
 
 def collect_data(
-    student_agent,
     teacher_agent,
     n_episodes=10,
-    exploration_prob=0.5,
     random_prob=0.1,
     verbose=True,
 ):
     """
-    Collect training data: student acts, teacher labels.
+    Collect training data by letting the teacher (with optional random noise) play.
 
     Args:
-        student_agent: QValueAgent that acts in the environment
         teacher_agent: Teacher agent (e.g., HeuristicAgent) that provides labels
         n_episodes: Number of episodes to collect
-        exploration_prob: Probability of taking teacher action instead of student action
         random_prob: Probability of forcing a random action for extra coverage
         verbose: Print progress
 
@@ -72,14 +67,10 @@ def collect_data(
     actions = []
     episode_rewards = []
 
-    student_agent.model.eval()
-
-    if random_prob + exploration_prob > 1.0:
-        raise ValueError("exploration_prob + random_prob must be <= 1.0")
-
     if verbose:
+        teacher_share = 1.0 - random_prob
         print(
-            f"Collecting data (teacher={exploration_prob:.2f}, random={random_prob:.2f}) "
+            f"Collecting data (teacher~{teacher_share:.2f}, random={random_prob:.2f}) "
             f"from {n_episodes} episodes..."
         )
 
@@ -108,13 +99,10 @@ def collect_data(
             actions.append(teacher_action)
 
             # Decide which action to take in environment
-            roll = np.random.random()
-            if roll < random_prob:
+            if np.random.random() < random_prob:
                 action_to_take = np.random.randint(0, 7)
-            elif roll < random_prob + exploration_prob:
-                action_to_take = teacher_action
             else:
-                action_to_take = student_agent.choose_action(obs[0], epsilon=0.1, deterministic=False)
+                action_to_take = teacher_action
 
             # Step environment
             obs, reward, terminated, truncated, info = env.step([action_to_take])
@@ -277,8 +265,6 @@ def train(
     lr=1e-3,
     device='cpu',
     val_split=0.2,
-    initial_exploration=0.9,
-    final_exploration=0.1,
     random_action_prob=0.1,
     checkpoint_dir='checkpoints',
     save_frequency=1
@@ -296,8 +282,6 @@ def train(
         lr: Learning rate
         device: 'cpu' or 'cuda'
         val_split: Validation split ratio
-        initial_exploration: Starting exploration probability (teacher action rate)
-        final_exploration: Final exploration probability
         random_action_prob: Probability of forcing a random environment action
         checkpoint_dir: Directory to save checkpoints
         save_frequency: Save checkpoint every N iterations
@@ -317,8 +301,8 @@ def train(
     criterion = nn.CrossEntropyLoss()
 
     # Initialize agents
-    student_agent = QValueAgent(device=str(device))
-    student_agent.model = model
+    eval_agent = QValueAgent(device=str(device))
+    eval_agent.model = model
 
     if teacher_type == 'heuristic':
         teacher_agent = HeuristicAgent()
@@ -357,27 +341,20 @@ def train(
     print(f"Epochs per iteration: {epochs_per_iter}")
     print(f"Batch size: {batch_size}")
     print(f"Learning rate: {lr}")
-    print(f"Exploration: {initial_exploration:.2f} -> {final_exploration:.2f}")
     print(f"Random action prob: {random_action_prob:.2f}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"{'='*70}\n")
 
     # Main training loop
     for iteration in range(start_iteration, n_iterations):
-        # Calculate exploration probability (linear decay)
-        exploration = initial_exploration + (final_exploration - initial_exploration) * (
-            iteration / max(n_iterations - 1, 1)
-        )
-
         print(f"\n{'='*70}")
-        print(f"Iteration {iteration + 1}/{n_iterations} (exploration={exploration:.2f})")
+        print(f"Iteration {iteration + 1}/{n_iterations}")
         print(f"{'='*70}")
 
-        # Collect data using current student policy
+        # Collect data using teacher policy + random noise
         states_empty, states_filled, actions, episode_rewards = collect_data(
-            student_agent, teacher_agent,
+            teacher_agent,
             n_episodes=episodes_per_iter,
-            exploration_prob=exploration,
             random_prob=random_action_prob,
             verbose=True
         )
@@ -440,7 +417,7 @@ def train(
 
         # Evaluate agent performance
         print("\nEvaluating agent performance...")
-        eval_metrics = evaluate_agent(student_agent, n_episodes=10)
+        eval_metrics = evaluate_agent(eval_agent, n_episodes=10)
         print(f"  Reward: {eval_metrics['mean_reward']:.2f} ± {eval_metrics['std_reward']:.2f}")
         print(f"  Lines: {eval_metrics['mean_lines']:.2f} ± {eval_metrics['std_lines']:.2f}")
 
@@ -512,11 +489,7 @@ def main():
     parser.add_argument('--val-split', type=float, default=0.2,
                         help='Validation split ratio')
 
-    # Exploration schedule
-    parser.add_argument('--initial-exploration', type=float, default=0.9,
-                        help='Initial exploration probability (teacher action rate)')
-    parser.add_argument('--final-exploration', type=float, default=0.1,
-                        help='Final exploration probability')
+    # Data diversity
     parser.add_argument('--random-action-prob', type=float, default=0.1,
                         help='Probability of forcing a random action during data collection')
 
@@ -538,8 +511,6 @@ def main():
         lr=args.lr,
         device=args.device,
         val_split=args.val_split,
-        initial_exploration=args.initial_exploration,
-        final_exploration=args.final_exploration,
         random_action_prob=args.random_action_prob,
         checkpoint_dir=args.checkpoint_dir,
         save_frequency=args.save_frequency
