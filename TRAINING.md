@@ -9,6 +9,9 @@
 ### Train from scratch
 ```bash
 python train.py
+
+# 50/50 heuristic vs random data mix to aggressively explore
+python train.py --random-action-prob 0.5
 ```
 
 ### Resume from checkpoint
@@ -18,7 +21,7 @@ python train.py --checkpoint checkpoints/checkpoint_iter005.pt
 
 ## Training Process
 
-1. **Data collection** – Student agent acts in the environment. Each step is labeled by the teacher and optionally perturbed by random actions.
+1. **Data collection** – Student agent acts in the environment. Each recorded state receives the label corresponding to the action actually executed (teacher or random), ensuring collected returns match the action we train on.
 2. **Supervised update** – The Q-network regresses discounted (γ≈0.99) line-clear returns for each teacher-labelled action using MSE loss.
 3. **Evaluation & checkpointing** – After each iteration we evaluate the greedy policy, log metrics, and save checkpoints.
 

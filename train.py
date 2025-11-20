@@ -108,10 +108,9 @@ def collect_data(
             # Get teacher action (always - this is the label)
             teacher_action = teacher_agent.choose_action(obs[0])
 
-            # Store state with teacher label
+            # Store state (labels decided after knowing executed action)
             episode_states_empty.append(board_empty)
             episode_states_filled.append(board_filled)
-            episode_actions.append(teacher_action)
 
             # Decide which action to take in environment
             if np.random.random() < random_prob:
@@ -127,6 +126,7 @@ def collect_data(
             step_reward = extract_line_clear_reward(reward[0])
             episode_reward += step_reward
             episode_step_rewards.append(step_reward)
+            episode_actions.append(action_to_take)
 
         episode_rewards.append(episode_reward)
         discounted_returns = compute_discounted_returns(episode_step_rewards, gamma=discount)

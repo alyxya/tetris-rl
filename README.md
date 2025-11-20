@@ -31,6 +31,9 @@ Train the Q-value agent using on-policy data collection with teacher supervision
 # Train from scratch (default settings)
 python train.py
 
+# 50/50 heuristic vs random mix to start entirely from scratch
+python train.py --random-action-prob 0.5
+
 # Quick test run
 python train.py --iterations 3 --episodes 10 --epochs 5
 
@@ -45,7 +48,7 @@ python train.py --checkpoint checkpoints/checkpoint_iter005.pt
 
 The training addresses **distribution shift** by generating fresh experience every iteration:
 
-1. **Data Collection**: Teacher agent (with occasional random actions) plays episodes and labels every state
+1. **Data Collection**: Teacher agent (with optional random actions) plays episodes and labels every state with the action that actually gets executed
 2. **Training**: Q-value network regresses teacher-labelled discounted (γ≈0.99) line-clear returns on the aggregate dataset
 3. **Evaluation**: Agent performance measured in actual gameplay
 4. **Checkpointing**: Regular checkpoints saved for resuming training
