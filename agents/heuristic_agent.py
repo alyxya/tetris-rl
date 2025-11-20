@@ -8,15 +8,24 @@ The agent:
 4. If tied or no lines, uses heuristics: minimize height, holes, bumpiness
 5. Rotates piece to target rotation, moves to target column, then drops
 
-Actions (verified empirically):
+Actions (matches `pufferlib/ocean/tetris/tetris.h`):
 0 = no-op (piece doesn't move)
-1 = left (move piece left one column)
-2 = right (move piece right one column)
+1 = move left
+2 = move right
 3 = rotate clockwise
-4 = down (soft drop - move piece down one row)
-5 = rotate counter-clockwise
-6 = no-op (same as action 0)
+4 = soft drop (move piece down one row)
+5 = hard drop
+6 = hold
 """
+
+# Keep action identifiers aligned with the PufferLib environment to avoid drift.
+ACTION_NO_OP = 0
+ACTION_LEFT = 1
+ACTION_RIGHT = 2
+ACTION_ROTATE = 3
+ACTION_SOFT_DROP = 4
+ACTION_HARD_DROP = 5
+ACTION_HOLD = 6
 
 import numpy as np
 import sys
@@ -231,10 +240,10 @@ class HeuristicAgent(BaseTetrisAgent):
         0 = no-op
         1 = left
         2 = right
-        3 = rotate cw
-        4 = down
-        5 = rotate ccw
-        6 = no-op
+        3 = rotate clockwise
+        4 = soft drop
+        5 = hard drop
+        6 = hold (not used here)
         """
         full_board, locked_board, active_piece = self.parse_observation(obs)
 
@@ -246,7 +255,7 @@ class HeuristicAgent(BaseTetrisAgent):
             self.target_column = None
             self.target_rotation = None
             self.current_rotations = 0
-            return 0
+            return ACTION_NO_OP
 
         # Get current piece leftmost column
         current_left_col = piece_cols.min()
@@ -258,21 +267,21 @@ class HeuristicAgent(BaseTetrisAgent):
 
             if self.target_column is None:
                 # No valid placement found, just drop
-                return 4
+                return ACTION_SOFT_DROP
 
         # Step 1: Rotate to target orientation first
         if self.current_rotations < self.target_rotation:
             self.current_rotations += 1
-            return 3  # Rotate clockwise
+            return ACTION_ROTATE  # Rotate clockwise
 
         # Step 2: Move to target column
         if current_left_col > self.target_column:
-            return 1  # Move left
+            return ACTION_LEFT  # Move left
         elif current_left_col < self.target_column:
-            return 2  # Move right
+            return ACTION_RIGHT  # Move right
         else:
             # Step 3: We're in position, drop!
             self.target_column = None
             self.target_rotation = None
             self.current_rotations = 0
-            return 4  # Soft drop (let it fall)
+            return ACTION_SOFT_DROP  # Soft drop (let it fall)
