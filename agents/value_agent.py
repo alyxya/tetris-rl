@@ -41,12 +41,17 @@ class TetrisValueCNN(nn.Module):
 
         # Shared CNN backbone (processes both board representations)
         # Input: (batch, 1, 20, 10)
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)  # -> (32, 20, 10)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1) # -> (64, 20, 10)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, padding=1) # -> (64, 20, 10)
+        # First conv uses no padding - we'll apply custom padding in forward_cnn
+        # Padding: left=2, right=2, top=0, bottom=2
+        # After padding: (20 + 0 + 2, 10 + 2 + 2) = (22, 14)
+        # After conv (kernel=3, no padding): (22-3+1, 14-3+1) = (20, 12)
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=0)  # Will be (32, 20, 12) after custom padding
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1) # -> (64, 20, 12)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, padding=1) # -> (64, 20, 12)
 
         # Calculate flattened size after conv layers
-        self.conv_output_size = 64 * n_rows * n_cols
+        # After custom padding + conv1: 20 rows, 12 cols
+        self.conv_output_size = 64 * n_rows * (n_cols + 2)
 
         # MLP head (combines board features + action features)
         # Input: concatenated board features (64*20*10 * 2) + action one-hot (n_actions)
@@ -67,6 +72,12 @@ class TetrisValueCNN(nn.Module):
         Returns:
             features: (batch, conv_output_size) flattened features
         """
+        # Apply custom padding for first conv layer
+        # Tetris has walls on left, right, and bottom (value=1), open top (no padding)
+        # Padding format: (left, right, top, bottom)
+        # Pad width 2 on left/right/bottom with 1s (walls), no top padding
+        x = F.pad(x, (2, 2, 0, 2), mode='constant', value=1.0)  # Pad with 1s (walls)
+
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
