@@ -10,6 +10,7 @@ Usage examples:
 """
 
 import argparse
+import time
 from pufferlib.ocean.tetris import tetris
 from agents import HeuristicAgent, QValueAgent, HybridAgent
 
@@ -29,7 +30,7 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
         steps: Number of steps taken
         total_reward: Total reward achieved
     """
-    obs, _ = env.reset()
+    obs, _ = env.reset(seed=int(time.time() * 1e6))
     agent.reset()
 
     done = False
@@ -90,7 +91,7 @@ def main():
     args = parser.parse_args()
 
     # Create environment
-    env = tetris.Tetris()
+    env = tetris.Tetris(seed=int(time.time() * 1e6))
 
     # Create agent
     if args.agent == 'heuristic':
