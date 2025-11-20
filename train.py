@@ -492,7 +492,7 @@ def train(
             val_loss = validate(model, val_loader, criterion, device)
 
             print(f"  Epoch {epoch+1}/{epochs_per_iter}: "
-                  f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+                  f"Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
 
             # Save best validation model
             if val_loss < best_metrics['val_loss']:
@@ -501,7 +501,7 @@ def train(
                     model, optimizer, scheduler, iteration, epoch,
                     best_metrics, len(all_actions), checkpoint_dir, 'best_val.pt'
                 )
-                print(f"    -> Saved best validation model (val_loss: {val_loss:.4f})")
+                print(f"    -> Saved best validation model (val_loss: {val_loss:.6f})")
 
         # Step scheduler based on validation loss
         scheduler.step(val_loss)
@@ -544,7 +544,7 @@ def train(
     print("Training Complete!")
     print(f"{'='*70}")
     best_val_loss = best_metrics.get('val_loss', float('inf'))
-    print(f"Best validation loss: {best_val_loss:.4f}")
+    print(f"Best validation loss: {best_val_loss:.6f}")
     print(f"Best evaluation reward: {best_metrics['eval_reward']:.2f}")
     print(f"Total dataset size: {len(all_actions):,} samples")
     print(f"Checkpoints saved to: {checkpoint_dir}/")
