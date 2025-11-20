@@ -10,27 +10,18 @@ N_COLS = 10
 LINES_TO_REWARD = {0: 0.0, 1: 0.1, 2: 0.3, 3: 0.6, 4: 1.0}
 
 
-def extract_line_clear_reward(prev_board, next_board, valid=True) -> float:
+def extract_line_clear_reward(prev_board, next_board) -> float:
     """Return synthetic line-clear reward using board occupancy."""
-    if not valid:
-        return 0.0
-
     lines = count_lines_cleared(prev_board, next_board)
     return LINES_TO_REWARD.get(lines, 0.0)
 
 
-def count_lines_cleared(prev_board, next_board, valid=True) -> int:
+def count_lines_cleared(prev_board, next_board) -> int:
     """Infer cleared lines from change in locked block counts."""
-    if not valid:
-        return 0
-
     prev_locked = _count_locked(prev_board)
     next_locked = _count_locked(next_board)
 
     delta = prev_locked + 4 - next_locked
-    if delta < 0:
-        return 0
-
     lines = max(0, min(4, delta // N_COLS))
     return lines
 

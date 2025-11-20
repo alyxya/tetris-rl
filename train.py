@@ -105,7 +105,6 @@ def collect_data(
             board_filled = locked.copy()
             board_filled[active] = 1.0
             prev_board = full_board.copy()
-            prev_tick = obs[0, 200]
 
             # Get teacher action (always - this is the label)
             teacher_action = teacher_agent.choose_action(obs[0])
@@ -126,9 +125,7 @@ def collect_data(
 
             # Extract line clear rewards only
             next_board = next_obs[0, :200].reshape(20, 10)
-            next_tick = next_obs[0, 200]
-            valid = next_tick >= prev_tick
-            step_reward = extract_line_clear_reward(prev_board, next_board, valid)
+            step_reward = extract_line_clear_reward(prev_board, next_board)
             episode_reward += step_reward
             episode_step_rewards.append(step_reward)
             episode_actions.append(action_to_take)
@@ -164,17 +161,14 @@ def evaluate_agent(agent, n_episodes=10):
 
         while not done:
             prev_board = obs[0, :200].reshape(20, 10).copy()
-            prev_tick = obs[0, 200]
             action = agent.choose_action(obs[0], deterministic=True)
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
 
             next_board = next_obs[0, :200].reshape(20, 10)
-            next_tick = next_obs[0, 200]
-            valid = next_tick >= prev_tick
-            step_reward = extract_line_clear_reward(prev_board, next_board, valid)
+            step_reward = extract_line_clear_reward(prev_board, next_board)
             episode_reward += step_reward
-            episode_lines += count_lines_cleared(prev_board, next_board, valid)
+            episode_lines += count_lines_cleared(prev_board, next_board)
             obs = next_obs
 
         total_rewards.append(episode_reward)

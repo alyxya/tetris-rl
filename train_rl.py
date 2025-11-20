@@ -145,7 +145,6 @@ def evaluate_model(model, device, n_episodes=10):
         while not done:
             board_empty, board_filled = extract_boards(obs[0])
             prev_board = obs[0, :200].reshape(20, 10).copy()
-            prev_tick = obs[0, 200]
             board_empty_t = torch.FloatTensor(board_empty).unsqueeze(0).unsqueeze(0).to(device)
             board_filled_t = torch.FloatTensor(board_filled).unsqueeze(0).unsqueeze(0).to(device)
             with torch.no_grad():
@@ -154,9 +153,7 @@ def evaluate_model(model, device, n_episodes=10):
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
             next_board = next_obs[0, :200].reshape(20, 10)
-            next_tick = next_obs[0, 200]
-            valid = next_tick >= prev_tick
-            total_reward += extract_line_clear_reward(prev_board, next_board, valid)
+            total_reward += extract_line_clear_reward(prev_board, next_board)
             obs = next_obs
 
         rewards.append(total_reward)
@@ -253,15 +250,12 @@ def train_rl(
 
         while not done:
             prev_board = obs[0, :200].reshape(20, 10).copy()
-            prev_tick = obs[0, 200]
             action = trainer.select_action(board_empty, board_filled, epsilon)
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
             next_empty, next_filled = extract_boards(next_obs[0])
             next_board = next_obs[0, :200].reshape(20, 10)
-            next_tick = next_obs[0, 200]
-            valid = next_tick >= prev_tick
-            reward_value = extract_line_clear_reward(prev_board, next_board, valid)
+            reward_value = extract_line_clear_reward(prev_board, next_board)
 
             trainer.store((board_empty, board_filled, action, reward_value, next_empty, next_filled, float(done)))
             loss = trainer.optimize(batch_size)
