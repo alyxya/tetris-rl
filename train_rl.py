@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 from pufferlib.ocean.tetris import tetris
 from agents.q_agent import TetrisQNetwork
-from utils.rewards import extract_line_clear_reward, LineClearPenaltyTracker
+from utils.rewards import extract_line_clear_reward, count_lines_cleared
 
 
 def extract_boards(obs_flat, n_rows, n_cols):
@@ -132,24 +132,28 @@ class QLearningTrainer:
         return loss.item()
 
 
-def evaluate_model(model, device, n_episodes=10):
-    """Run greedy episodes to gauge performance."""
+def evaluate_model(model, device, n_episodes=10, height_penalty_weight=0.0002):
+    """Run greedy episodes to gauge performance with height-based penalty system."""
     env = tetris.Tetris(seed=int(time.time() * 1e6))
     n_rows = env.n_rows
     n_cols = env.n_cols
     board_size = n_rows * n_cols
     rewards = []
+    lines_cleared_list = []
+    penalty_actions = {1, 2, 3}
 
     for _ in range(n_episodes):
         obs, _ = env.reset(seed=int(time.time() * 1e6))
         done = False
         total_reward = 0.0
-        penalty_tracker = LineClearPenaltyTracker()
+        total_lines = 0
 
         while not done:
             board_empty, board_filled = extract_boards(obs[0], n_rows, n_cols)
-            prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
-            prev_tick = obs[0, board_size]
+            full_board = obs[0, :board_size].reshape(n_rows, n_cols)
+            prev_board = full_board.copy()
+            active = (full_board == 2)
+
             board_empty_t = torch.FloatTensor(board_empty).unsqueeze(0).unsqueeze(0).to(device)
             board_filled_t = torch.FloatTensor(board_filled).unsqueeze(0).unsqueeze(0).to(device)
             with torch.no_grad():
@@ -161,18 +165,24 @@ def evaluate_model(model, device, n_episodes=10):
             # Skip reward calculation on terminal states to avoid false line clear detection
             if not done:
                 next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-                next_tick = next_obs[0, board_size]
-                if next_tick < prev_tick:
-                    penalty_tracker.reset()
-                    step_reward = 0.0
-                else:
-                    base_reward = extract_line_clear_reward(prev_board, next_board)
-                    step_reward = penalty_tracker.step(action, base_reward)
-                total_reward += step_reward
+                step_reward = extract_line_clear_reward(prev_board, next_board)
+
+                # Height-based penalty (matching train.py)
+                step_penalty = 0.0
+                if action in penalty_actions and np.any(active):
+                    active_rows = np.where(active)[0]
+                    height_from_top = np.min(active_rows)
+                    step_penalty = height_penalty_weight * (height_from_top + 1)
+
+                lines_cleared = count_lines_cleared(prev_board, next_board)
+
+                total_reward += step_reward - step_penalty
+                total_lines += lines_cleared
 
             obs = next_obs
 
         rewards.append(total_reward)
+        lines_cleared_list.append(total_lines)
 
     env.close()
     return float(np.mean(rewards)), float(np.std(rewards))
@@ -217,6 +227,7 @@ def train_rl(
     eval_episodes=5,
     checkpoint_dir='checkpoints_rl',
     save_frequency=50,
+    height_penalty_weight=0.0002,
 ):
     """Main Q-learning training loop."""
 
@@ -257,35 +268,41 @@ def train_rl(
     n_cols = env.n_cols
     board_size = n_rows * n_cols
     global_step = 0
+    penalty_actions = {1, 2, 3}
 
     for episode in range(start_episode, n_episodes):
         obs, _ = env.reset(seed=int(time.time() * 1e6))
         board_empty, board_filled = extract_boards(obs[0], n_rows, n_cols)
         done = False
         episode_reward = 0.0
-        penalty_tracker = LineClearPenaltyTracker()
 
         frac = episode / max(1, n_episodes - 1)
         epsilon = max(epsilon_end, epsilon_start - frac * (epsilon_start - epsilon_end) * epsilon_decay)
 
         while not done:
-            prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
-            prev_tick = obs[0, board_size]
+            full_board = obs[0, :board_size].reshape(n_rows, n_cols)
+            prev_board = full_board.copy()
+            active = (full_board == 2)
+
             action = trainer.select_action(board_empty, board_filled, epsilon)
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
             next_empty, next_filled = extract_boards(next_obs[0], n_rows, n_cols)
 
             # Skip reward calculation on terminal states to avoid false line clear detection
+            # Use height-based penalty system (matching train.py)
             if not done:
                 next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-                next_tick = next_obs[0, board_size]
-                if next_tick < prev_tick:
-                    penalty_tracker.reset()
-                    reward_value = 0.0
-                else:
-                    base_reward = extract_line_clear_reward(prev_board, next_board)
-                    reward_value = penalty_tracker.step(action, base_reward)
+                step_reward = extract_line_clear_reward(prev_board, next_board)
+
+                # Height-based penalty
+                step_penalty = 0.0
+                if action in penalty_actions and np.any(active):
+                    active_rows = np.where(active)[0]
+                    height_from_top = np.min(active_rows)
+                    step_penalty = height_penalty_weight * (height_from_top + 1)
+
+                reward_value = step_reward - step_penalty
             else:
                 reward_value = 0.0
 
@@ -301,7 +318,7 @@ def train_rl(
                 trainer.update_target()
 
         if (episode + 1) % eval_frequency == 0:
-            mean_reward, std_reward = evaluate_model(trainer.model, device, eval_episodes)
+            mean_reward, std_reward = evaluate_model(trainer.model, device, eval_episodes, height_penalty_weight)
             print(f"Episode {episode + 1}/{n_episodes} | Eval reward: {mean_reward:.2f} ± {std_reward:.2f}")
             if mean_reward > best_reward:
                 best_reward = mean_reward
@@ -355,6 +372,8 @@ def main():
                         help='Directory for RL checkpoints')
     parser.add_argument('--save-frequency', type=int, default=50,
                         help='Save checkpoint every N episodes')
+    parser.add_argument('--height-penalty-weight', type=float, default=0.0002,
+                        help='Penalty weight per unit height for movement actions (matching train.py)')
 
     args = parser.parse_args()
 
@@ -376,6 +395,7 @@ def main():
         eval_episodes=args.eval_episodes,
         checkpoint_dir=args.checkpoint_dir,
         save_frequency=args.save_frequency,
+        height_penalty_weight=args.height_penalty_weight,
     )
 
 
