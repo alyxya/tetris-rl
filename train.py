@@ -110,9 +110,10 @@ def collect_data(
         episode_actions = []
         episode_step_rewards = []
         episode_step_penalties = []
-        episode_piece_boundaries = []  # Track when pieces change
+        episode_piece_boundaries = []  # Track when pieces lock
 
-        prev_tick = obs[0, board_size]
+        # Track if there's an active piece (value 2 on board)
+        prev_has_active = np.any(obs[0, :board_size] == 2)
 
         while not done:
             # Parse observation
@@ -149,11 +150,15 @@ def collect_data(
             # Compute penalty for movement actions
             step_penalty = penalty_per_move if action_to_take in penalty_actions else 0.0
 
-            # Check if piece changed (tick resets when new piece spawns)
-            next_tick = next_obs[0, board_size]
-            if next_tick < prev_tick:
+            # Check if piece locked (active piece disappeared and new one spawned)
+            next_has_active = np.any(next_obs[0, :board_size] == 2)
+            if prev_has_active and next_has_active:
+                # Piece still falling
+                pass
+            elif not prev_has_active and next_has_active:
+                # New piece spawned - mark boundary
                 episode_piece_boundaries.append(len(episode_actions))
-            prev_tick = next_tick
+            prev_has_active = next_has_active
 
             episode_reward += step_reward - step_penalty
             episode_step_rewards.append(step_reward)
