@@ -38,7 +38,7 @@ def compute_discounted_returns(rewards: Iterable[float], gamma: float = 0.99) ->
     return returns
 
 
-def compute_penalty_returns(penalties: Iterable[float], growth: float = 1.1) -> List[float]:
+def compute_penalty_returns(penalties: Iterable[float], growth: float = 1.005) -> List[float]:
     """
     Compute growing penalty returns for a penalty sequence.
 
@@ -47,7 +47,7 @@ def compute_penalty_returns(penalties: Iterable[float], growth: float = 1.1) -> 
 
     Args:
         penalties: Sequence of per-step penalties (0.01 for left/right/rotate, 0.0 otherwise)
-        growth: Growth factor for future penalties (default: 1.1)
+        growth: Growth factor for future penalties (default: 1.005)
 
     Returns:
         List of cumulative penalty values with growth factor applied
