@@ -80,7 +80,9 @@ def main():
     parser.add_argument('--verbose', action='store_true', default=True,
                         help='Print progress during episodes')
     parser.add_argument('--student-probability', type=float, default=0.5,
-                        help='For hybrid agent: probability of using student vs teacher (default: 0.5)')
+                        help='For hybrid agent: probability of using student (default: 0.5)')
+    parser.add_argument('--random-probability', type=float, default=0.0,
+                        help='For hybrid agent: probability of using random action (default: 0.0)')
     parser.add_argument('--debug-values', action='store_true',
                         help='Print predicted values for each action (value agent only)')
 
@@ -109,9 +111,14 @@ def main():
         else:
             print("Using randomly initialized model")
     elif args.agent == 'hybrid':
-        agent = HybridAgent(model_path=args.model_path, student_probability=args.student_probability)
+        agent = HybridAgent(
+            model_path=args.model_path,
+            student_probability=args.student_probability,
+            random_probability=args.random_probability
+        )
         print(f"Running HybridAgent for {args.episodes} episode(s)...")
-        print(f"The agent uses student with {args.student_probability:.1%} probability, teacher with {1-args.student_probability:.1%} probability.")
+        teacher_prob = 1.0 - args.student_probability - args.random_probability
+        print(f"  Student: {args.student_probability:.1%}, Random: {args.random_probability:.1%}, Teacher: {teacher_prob:.1%}")
         if args.model_path:
             print(f"Loaded student model from {args.model_path}")
         else:
@@ -137,8 +144,9 @@ def main():
         # Print usage stats for hybrid agent
         if args.agent == 'hybrid':
             stats = agent.get_usage_stats()
-            print(f"  Student used: {stats['student_count']} times ({stats['student_percentage']:.1f}%)")
-            print(f"  Teacher used: {stats['teacher_count']} times ({stats['teacher_percentage']:.1f}%)")
+            print(f"  Student: {stats['student_count']} times ({stats['student_percentage']:.1f}%)")
+            print(f"  Random: {stats['random_count']} times ({stats['random_percentage']:.1f}%)")
+            print(f"  Teacher: {stats['teacher_count']} times ({stats['teacher_percentage']:.1f}%)")
 
     # Print summary
     if args.episodes > 1:
