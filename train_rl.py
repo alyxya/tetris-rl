@@ -126,12 +126,11 @@ def train_value_rl(args):
             action = agent.choose_action(obs, epsilon=epsilon)
 
             # Take step
-            next_obs, env_reward, terminated, truncated, _ = env.step(action)
+            next_obs, _, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
-            # Compute heuristic reward
-            heuristic_reward = compute_heuristic_reward(locked, active)
-            reward = args.heuristic_weight * heuristic_reward + args.env_weight * env_reward
+            # Compute heuristic reward (ignore environment reward)
+            reward = compute_heuristic_reward(locked, active)
 
             # Parse next state
             _, next_locked, next_active = agent.parse_observation(next_obs)
@@ -251,12 +250,11 @@ def train_policy_rl(args):
             actions.append(action)
 
             # Take step
-            next_obs, env_reward, terminated, truncated, _ = env.step(action)
+            next_obs, _, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
-            # Compute heuristic reward
-            heuristic_reward = compute_heuristic_reward(locked, active)
-            reward = args.heuristic_weight * heuristic_reward + args.env_weight * env_reward
+            # Compute heuristic reward (ignore environment reward)
+            reward = compute_heuristic_reward(locked, active)
             rewards.append(reward)
 
             obs = next_obs
@@ -321,10 +319,6 @@ def main():
                         help="Output path for trained model")
     parser.add_argument('--init-model', type=str, default=None,
                         help="Path to pretrained model to initialize from")
-    parser.add_argument('--heuristic-weight', type=float, default=1.0,
-                        help="Weight for heuristic reward component")
-    parser.add_argument('--env-weight', type=float, default=0.0,
-                        help="Weight for environment reward component")
     parser.add_argument('--grad-clip', type=float, default=1.0,
                         help="Gradient clipping threshold")
 

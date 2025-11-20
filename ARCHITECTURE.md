@@ -105,22 +105,23 @@ Two modes:
 - Q-learning with experience replay
 - Online and target networks (update every 10 episodes)
 - Epsilon-greedy exploration (0.2 → 0.01)
-- Heuristic reward as primary signal
+- Uses heuristic reward only
 
 **Policy Network (`--mode policy`)**:
 - REINFORCE algorithm
-- Heuristic reward as primary signal
-- Optional environment reward mixing (`--heuristic-weight`, `--env-weight`)
+- Uses heuristic reward only
 
 Usage:
 ```bash
 # Train value network with RL
-python train_rl.py --mode value --num-episodes 1000 \\
-    --init-model models/value_supervised.pt --output models/value_rl.pt
+python train_rl.py --mode value --num-episodes 1000 --output models/value_rl.pt
 
 # Train policy network with RL
-python train_rl.py --mode policy --num-episodes 1000 \\
-    --init-model models/policy_supervised.pt --output models/policy_rl.pt
+python train_rl.py --mode policy --num-episodes 1000 --output models/policy_rl.pt
+
+# Optional: Start from supervised pretrained model
+python train_rl.py --mode value --num-episodes 1000 \\
+    --init-model models/value_supervised.pt --output models/value_rl.pt
 ```
 
 ## Running Agents (`main.py`)
@@ -176,7 +177,8 @@ python main.py --agent hybrid --agents heuristic,value,random --probs 0.4,0.4,0.
 - Single source of truth for what "good" means
 - Heuristic agent provides teacher signal
 - Value network learns to predict heuristic scores
-- Policy network can use heuristic as auxiliary reward
+- Policy network uses heuristic as training reward
+- Environment rewards (line clears) are too sparse for learning
 
 ### Why Minimal Flags?
 - Previous version had complex configuration and many unused features
