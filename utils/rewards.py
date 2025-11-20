@@ -38,6 +38,28 @@ def compute_discounted_returns(rewards: Iterable[float], gamma: float = 0.99) ->
     return returns
 
 
+def compute_penalty_returns(penalties: Iterable[float], growth: float = 1.2) -> List[float]:
+    """
+    Compute growing penalty returns for a penalty sequence.
+
+    Unlike rewards which decay (gamma < 1), penalties grow (growth > 1)
+    to make future movement penalties more costly than current ones.
+
+    Args:
+        penalties: Sequence of per-step penalties (0.01 for left/right/rotate, 0.0 otherwise)
+        growth: Growth factor for future penalties (default: 1.2)
+
+    Returns:
+        List of cumulative penalty values with growth factor applied
+    """
+    returns: List[float] = [0.0] * len(penalties)
+    future = 0.0
+    for idx in reversed(range(len(penalties))):
+        future = penalties[idx] + growth * future
+        returns[idx] = future
+    return returns
+
+
 class LineClearPenaltyTracker:
     """Track translation/rotation actions to apply proximity penalties on clears."""
 

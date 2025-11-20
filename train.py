@@ -25,8 +25,8 @@ from agents.q_agent import QValueAgent, TetrisQNetwork
 from utils.rewards import (
     extract_line_clear_reward,
     compute_discounted_returns,
+    compute_penalty_returns,
     count_lines_cleared,
-    LineClearPenaltyTracker,
 )
 
 
@@ -56,6 +56,8 @@ def collect_data(
     n_episodes=10,
     random_prob=0.1,
     discount=0.99,
+    penalty_growth=1.2,
+    penalty_per_move=0.01,
     verbose=True,
 ):
     """
@@ -65,15 +67,17 @@ def collect_data(
         teacher_agent: Teacher agent (e.g., HeuristicAgent) that provides labels
         n_episodes: Number of episodes to collect
         random_prob: Probability of forcing a random action for extra coverage
-        discount: Discount factor used for line-clear return targets
+        discount: Discount factor used for line-clear return targets (default: 0.99)
+        penalty_growth: Growth factor for penalty returns (default: 1.2)
+        penalty_per_move: Penalty value for left/right/rotate actions (default: 0.01)
         verbose: Print progress
 
     Returns:
         states_empty: list of boards with piece as empty
         states_filled: list of boards with piece as filled
         actions: list of teacher action labels
-        q_values: list of discounted line-clear returns
-        episode_rewards: list of per-episode line clear rewards
+        q_values: list of combined Q-values (reward_returns - penalty_returns)
+        episode_rewards: list of per-episode net rewards
     """
     env = tetris.Tetris(seed=int(time.time() * 1e6))
     n_rows = env.n_rows
@@ -93,6 +97,9 @@ def collect_data(
             f"from {n_episodes} episodes..."
         )
 
+    # Movement actions that incur penalties (left, right, rotate)
+    penalty_actions = {1, 2, 3}
+
     for episode in tqdm(range(n_episodes), disable=not verbose):
         obs, _ = env.reset(seed=int(time.time() * 1e6))
         teacher_agent.reset()
@@ -102,13 +109,11 @@ def collect_data(
         episode_states_filled = []
         episode_actions = []
         episode_step_rewards = []
-
-        penalty_tracker = LineClearPenaltyTracker()
+        episode_step_penalties = []
 
         while not done:
             # Parse observation
             full_board = obs[0, :board_size].reshape(n_rows, n_cols)
-            prev_tick = obs[0, board_size]
             locked = (full_board == 1).astype(np.float32)
             active = (full_board == 2)
 
@@ -134,27 +139,33 @@ def collect_data(
             next_obs, reward, terminated, truncated, info = env.step([action_to_take])
             done = terminated[0] or truncated[0]
 
-            # Extract line clear rewards only
+            # Extract line clear rewards
             next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-            next_tick = next_obs[0, board_size]
-            if next_tick < prev_tick:
-                penalty_tracker.reset()
-                step_reward = 0.0
-            else:
-                base_reward = extract_line_clear_reward(prev_board, next_board)
-                step_reward = penalty_tracker.step(action_to_take, base_reward)
-            episode_reward += step_reward
+            step_reward = extract_line_clear_reward(prev_board, next_board)
+
+            # Compute penalty for movement actions
+            step_penalty = penalty_per_move if action_to_take in penalty_actions else 0.0
+
+            episode_reward += step_reward - step_penalty
             episode_step_rewards.append(step_reward)
+            episode_step_penalties.append(step_penalty)
             episode_actions.append(action_to_take)
 
             obs = next_obs
 
         episode_rewards.append(episode_reward)
-        discounted_returns = compute_discounted_returns(episode_step_rewards, gamma=discount)
+
+        # Compute separate returns for rewards and penalties
+        reward_returns = compute_discounted_returns(episode_step_rewards, gamma=discount)
+        penalty_returns = compute_penalty_returns(episode_step_penalties, growth=penalty_growth)
+
+        # Combined Q-value = reward_returns - penalty_returns
+        combined_q_values = [r - p for r, p in zip(reward_returns, penalty_returns)]
+
         states_empty.extend(episode_states_empty)
         states_filled.extend(episode_states_filled)
         actions.extend(episode_actions)
-        q_targets.extend(discounted_returns)
+        q_targets.extend(combined_q_values)
 
     env.close()
 
@@ -164,14 +175,15 @@ def collect_data(
     return states_empty, states_filled, actions, q_targets, episode_rewards
 
 
-def evaluate_agent(agent, n_episodes=10):
-    """Evaluate agent performance."""
+def evaluate_agent(agent, n_episodes=10, penalty_per_move=0.01):
+    """Evaluate agent performance with new reward/penalty system."""
     env = tetris.Tetris(seed=int(time.time() * 1e6))
     n_rows = env.n_rows
     n_cols = env.n_cols
     board_size = n_rows * n_cols
     total_rewards = []
     total_lines = []
+    penalty_actions = {1, 2, 3}
 
     for _ in range(n_episodes):
         obs, _ = env.reset(seed=int(time.time() * 1e6))
@@ -179,26 +191,18 @@ def evaluate_agent(agent, n_episodes=10):
         episode_reward = 0
         episode_lines = 0
 
-        penalty_tracker = LineClearPenaltyTracker()
-
         while not done:
             prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
-            prev_tick = obs[0, board_size]
             action = agent.choose_action(obs[0], deterministic=True)
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
 
             next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-            next_tick = next_obs[0, board_size]
-            if next_tick < prev_tick:
-                penalty_tracker.reset()
-                step_reward = 0.0
-                lines_cleared = 0
-            else:
-                base_reward = extract_line_clear_reward(prev_board, next_board)
-                step_reward = penalty_tracker.step(action, base_reward)
-                lines_cleared = count_lines_cleared(prev_board, next_board)
-            episode_reward += step_reward
+            step_reward = extract_line_clear_reward(prev_board, next_board)
+            step_penalty = penalty_per_move if action in penalty_actions else 0.0
+            lines_cleared = count_lines_cleared(prev_board, next_board)
+
+            episode_reward += step_reward - step_penalty
             episode_lines += lines_cleared
             obs = next_obs
 
@@ -306,6 +310,8 @@ def train(
     val_split=0.2,
     random_action_prob=0.1,
     discount=0.99,
+    penalty_growth=1.2,
+    penalty_per_move=0.01,
     checkpoint_dir='checkpoints',
     save_frequency=1
 ):
@@ -323,7 +329,9 @@ def train(
         device: 'cpu' or 'cuda'
         val_split: Validation split ratio
         random_action_prob: Probability of forcing a random environment action
-        discount: Discount factor for line-clear return targets
+        discount: Discount factor for reward returns (default: 0.99)
+        penalty_growth: Growth factor for penalty returns (default: 1.2)
+        penalty_per_move: Penalty per left/right/rotate action (default: 0.01)
         checkpoint_dir: Directory to save checkpoints
         save_frequency: Save checkpoint every N iterations
     """
@@ -386,7 +394,9 @@ def train(
     print(f"Batch size: {batch_size}")
     print(f"Learning rate: {lr}")
     print(f"Random action prob: {random_action_prob:.2f}")
-    print(f"Discount factor: {discount:.2f}")
+    print(f"Reward discount: {discount:.2f}")
+    print(f"Penalty growth: {penalty_growth:.2f}")
+    print(f"Penalty per move: {penalty_per_move:.3f}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"{'='*70}\n")
 
@@ -402,6 +412,8 @@ def train(
             n_episodes=episodes_per_iter,
             random_prob=random_action_prob,
             discount=discount,
+            penalty_growth=penalty_growth,
+            penalty_per_move=penalty_per_move,
             verbose=True
         )
 
@@ -538,7 +550,11 @@ def main():
     parser.add_argument('--val-split', type=float, default=0.2,
                         help='Validation split ratio')
     parser.add_argument('--discount', type=float, default=0.99,
-                        help='Discount factor for line-clear returns')
+                        help='Discount factor for reward returns')
+    parser.add_argument('--penalty-growth', type=float, default=1.2,
+                        help='Growth factor for penalty returns')
+    parser.add_argument('--penalty-per-move', type=float, default=0.01,
+                        help='Penalty value for left/right/rotate actions')
 
     # Data diversity
     parser.add_argument('--random-action-prob', type=float, default=0.1,
@@ -564,6 +580,8 @@ def main():
         val_split=args.val_split,
         random_action_prob=args.random_action_prob,
         discount=args.discount,
+        penalty_growth=args.penalty_growth,
+        penalty_per_move=args.penalty_per_move,
         checkpoint_dir=args.checkpoint_dir,
         save_frequency=args.save_frequency
     )
