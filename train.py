@@ -104,6 +104,7 @@ def collect_data(
         while not done:
             # Parse observation
             full_board = obs[0, :board_size].reshape(n_rows, n_cols)
+            prev_tick = obs[0, board_size]
             locked = (full_board == 1).astype(np.float32)
             active = (full_board == 2)
 
@@ -131,7 +132,11 @@ def collect_data(
 
             # Extract line clear rewards only
             next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-            step_reward = extract_line_clear_reward(prev_board, next_board)
+            next_tick = next_obs[0, board_size]
+            if next_tick < prev_tick:
+                step_reward = 0.0
+            else:
+                step_reward = extract_line_clear_reward(prev_board, next_board)
             episode_reward += step_reward
             episode_step_rewards.append(step_reward)
             episode_actions.append(action_to_take)
@@ -167,14 +172,21 @@ def evaluate_agent(agent, n_episodes=10):
 
         while not done:
             prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
+            prev_tick = obs[0, board_size]
             action = agent.choose_action(obs[0], deterministic=True)
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
 
             next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-            step_reward = extract_line_clear_reward(prev_board, next_board)
+            next_tick = next_obs[0, board_size]
+            if next_tick < prev_tick:
+                step_reward = 0.0
+                lines_cleared = 0
+            else:
+                step_reward = extract_line_clear_reward(prev_board, next_board)
+                lines_cleared = count_lines_cleared(prev_board, next_board)
             episode_reward += step_reward
-            episode_lines += count_lines_cleared(prev_board, next_board)
+            episode_lines += lines_cleared
             obs = next_obs
 
         total_rewards.append(episode_reward)
