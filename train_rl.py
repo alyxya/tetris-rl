@@ -1,536 +1,343 @@
 """
-Reinforcement Learning: Train CNN agent with policy gradient (REINFORCE).
+Q-learning fine-tuning for the unified Tetris Q-value agent.
 
-Fine-tune supervised pretrained model with RL to potentially surpass teacher performance.
+Workflow:
+1. Start from a supervised-pretrained model (optional but recommended)
+2. Continue training with TD learning using default PufferLib rewards
 """
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-import numpy as np
-from collections import deque
-from tqdm import tqdm
 import argparse
 import os
-from datetime import datetime
+import random
+from collections import deque
+
+import numpy as np
+import torch
+import torch.nn.functional as F
 
 from pufferlib.ocean.tetris import tetris
-from agents.cnn_agent import TetrisCNN
+from agents.q_agent import TetrisQNetwork
 
 
-class RLTrainer:
-    """REINFORCE trainer for Tetris CNN agent."""
+def extract_boards(obs_flat, n_rows=20, n_cols=10):
+    """Convert flattened env observation into (board_empty, board_filled)."""
+    board = obs_flat[: n_rows * n_cols].reshape(n_rows, n_cols)
+    locked = (board == 1).astype(np.float32)
+    active = (board == 2)
 
-    def __init__(self, model, device, lr=1e-4, gamma=0.99, entropy_coef=0.01):
-        """
-        Initialize RL trainer.
+    board_empty = locked
+    board_filled = locked.copy()
+    board_filled[active] = 1.0
+    return board_empty, board_filled
 
-        Args:
-            model: TetrisCNN model
-            device: torch device
-            lr: Learning rate
-            gamma: Discount factor for returns
-            entropy_coef: Entropy regularization coefficient
-        """
-        self.model = model.to(device)
+
+class ReplayBuffer:
+    """Simple FIFO replay buffer for experience replay."""
+
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.buffer = deque(maxlen=capacity)
+
+    def __len__(self):
+        return len(self.buffer)
+
+    def push(self, transition):
+        self.buffer.append(transition)
+
+    def sample(self, batch_size):
+        batch = random.sample(self.buffer, batch_size)
+        state_e, state_f, actions, rewards, next_e, next_f, dones = zip(*batch)
+        return (
+            np.stack(state_e),
+            np.stack(state_f),
+            np.array(actions, dtype=np.int64),
+            np.array(rewards, dtype=np.float32),
+            np.stack(next_e),
+            np.stack(next_f),
+            np.array(dones, dtype=np.float32),
+        )
+
+
+class QLearningTrainer:
+    """Encapsulates optimization logic for Q-learning with target network."""
+
+    def __init__(
+        self,
+        model,
+        device,
+        lr=1e-4,
+        gamma=0.99,
+        buffer_size=100000,
+        min_buffer=2000,
+    ):
+        self.model = model
+        self.target_model = TetrisQNetwork().to(device)
+        self.target_model.load_state_dict(model.state_dict())
         self.device = device
         self.gamma = gamma
-        self.entropy_coef = entropy_coef
+        self.replay_buffer = ReplayBuffer(buffer_size)
+        self.min_buffer = min_buffer
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.global_step = 0
 
-        self.optimizer = optim.Adam(model.parameters(), lr=lr)
+    def select_action(self, board_empty, board_filled, epsilon):
+        """Epsilon-greedy action selection using current Q-values."""
+        if np.random.random() < epsilon:
+            return np.random.randint(0, 7)
 
-        # Episode buffer
-        self.reset_episode()
+        board_empty_t = torch.FloatTensor(board_empty).unsqueeze(0).unsqueeze(0).to(self.device)
+        board_filled_t = torch.FloatTensor(board_filled).unsqueeze(0).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            values = self.model(board_empty_t, board_filled_t)
+        return int(values.argmax(dim=1).item())
 
-    def reset_episode(self):
-        """Reset episode buffer."""
-        self.log_probs = []
-        self.rewards = []
-        self.entropies = []
+    def store(self, transition):
+        self.replay_buffer.push(transition)
 
-    def select_action(self, board_empty, board_filled, temperature=1.0):
-        """
-        Select action and store log probability.
+    def update_target(self):
+        self.target_model.load_state_dict(self.model.state_dict())
 
-        Args:
-            board_empty: (1, 1, H, W) board tensor with piece as empty
-            board_filled: (1, 1, H, W) board tensor with piece as filled
-            temperature: Sampling temperature
+    def optimize(self, batch_size):
+        """Run one TD update if enough samples are available."""
+        if len(self.replay_buffer) < self.min_buffer:
+            return None
 
-        Returns:
-            action: Selected action
-        """
-        logits = self.model(board_empty, board_filled)
-        logits = logits / temperature
+        state_e, state_f, actions, rewards, next_e, next_f, dones = self.replay_buffer.sample(batch_size)
 
-        probs = F.softmax(logits, dim=1)
-        dist = torch.distributions.Categorical(probs)
-        action = dist.sample()
+        state_e = torch.FloatTensor(state_e).unsqueeze(1).to(self.device)
+        state_f = torch.FloatTensor(state_f).unsqueeze(1).to(self.device)
+        next_e = torch.FloatTensor(next_e).unsqueeze(1).to(self.device)
+        next_f = torch.FloatTensor(next_f).unsqueeze(1).to(self.device)
+        actions = torch.LongTensor(actions).unsqueeze(1).to(self.device)
+        rewards = torch.FloatTensor(rewards).to(self.device)
+        dones = torch.FloatTensor(dones).to(self.device)
 
-        # Store for training
-        self.log_probs.append(dist.log_prob(action))
-        self.entropies.append(dist.entropy())
+        q_values = self.model(state_e, state_f)
+        state_action_values = q_values.gather(1, actions).squeeze(1)
 
-        return action.item()
+        with torch.no_grad():
+            next_q_values = self.target_model(next_e, next_f).max(1)[0]
+            targets = rewards + self.gamma * (1.0 - dones) * next_q_values
 
-    def store_reward(self, reward):
-        """Store reward for current timestep."""
-        self.rewards.append(reward)
+        loss = F.mse_loss(state_action_values, targets)
 
-    def compute_returns(self):
-        """
-        Compute discounted returns for episode.
-
-        Returns:
-            returns: List of discounted returns
-        """
-        returns = []
-        R = 0
-
-        # Compute returns backwards
-        for reward in reversed(self.rewards):
-            R = reward + self.gamma * R
-            returns.insert(0, R)
-
-        # Normalize returns for stability
-        returns = torch.tensor(returns, device=self.device)
-        if len(returns) > 1:
-            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
-
-        return returns
-
-    def update(self):
-        """
-        Update model using REINFORCE.
-
-        Returns:
-            loss: Total loss value
-        """
-        if len(self.rewards) == 0:
-            return 0.0
-
-        returns = self.compute_returns()
-
-        policy_loss = []
-        for log_prob, R in zip(self.log_probs, returns):
-            policy_loss.append(-log_prob * R)
-
-        # Add entropy bonus for exploration
-        entropy = torch.stack(self.entropies).mean()
-
-        # Total loss
-        loss = torch.stack(policy_loss).sum() - self.entropy_coef * entropy
-
-        # Update
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
         self.optimizer.step()
 
+        self.global_step += 1
         return loss.item()
 
 
-def prepare_board_inputs(obs, device):
-    """
-    Prepare dual board representation for CNN.
-
-    Args:
-        obs: flattened observation array
-        device: torch device
-
-    Returns:
-        board_empty: (1, 1, H, W) tensor with piece as empty
-        board_filled: (1, 1, H, W) tensor with piece as filled
-    """
-    full_board = obs[0, :200].reshape(20, 10)
-    locked = (full_board == 1).astype(np.float32)
-    active = (full_board == 2)
-
-    # Board with piece as empty
-    board_empty = locked.copy()
-
-    # Board with piece as filled
-    board_filled = locked.copy()
-    board_filled[active] = 1.0
-
-    # Convert to tensors
-    board_empty = torch.FloatTensor(board_empty).unsqueeze(0).unsqueeze(0).to(device)
-    board_filled = torch.FloatTensor(board_filled).unsqueeze(0).unsqueeze(0).to(device)
-
-    return board_empty, board_filled
-
-
-def evaluate_model(model, device, n_episodes=10, deterministic=True):
-    """
-    Evaluate model performance.
-
-    Args:
-        model: TetrisCNN model
-        device: torch device
-        n_episodes: Number of episodes to evaluate
-        deterministic: Use argmax action selection
-
-    Returns:
-        metrics: Dict with mean/std reward and length
-    """
+def evaluate_model(model, device, n_episodes=10):
+    """Run greedy episodes to gauge performance."""
     env = tetris.Tetris()
-    model.eval()
+    rewards = []
 
-    total_rewards = []
-    total_lengths = []
+    for _ in range(n_episodes):
+        obs, _ = env.reset()
+        done = False
+        total_reward = 0.0
 
-    with torch.no_grad():
-        for _ in range(n_episodes):
-            obs, _ = env.reset()
-            done = False
-            episode_reward = 0
-            steps = 0
+        while not done:
+            board_empty, board_filled = extract_boards(obs[0])
+            board_empty_t = torch.FloatTensor(board_empty).unsqueeze(0).unsqueeze(0).to(device)
+            board_filled_t = torch.FloatTensor(board_filled).unsqueeze(0).unsqueeze(0).to(device)
+            with torch.no_grad():
+                action = model(board_empty_t, board_filled_t).argmax(dim=1).item()
 
-            while not done:
-                board_empty, board_filled = prepare_board_inputs(obs, device)
-                logits = model(board_empty, board_filled)
+            obs, reward, terminated, truncated, info = env.step([action])
+            done = terminated[0] or truncated[0]
+            total_reward += float(reward[0])
 
-                if deterministic:
-                    action = logits.argmax(dim=1).item()
-                else:
-                    probs = F.softmax(logits, dim=1)
-                    action = torch.multinomial(probs, num_samples=1).item()
-
-                obs, reward, terminated, truncated, info = env.step([action])
-                done = terminated[0] or truncated[0]
-
-                # Extract line clear rewards only
-                step_reward = round(reward[0], 2)
-                if step_reward >= 0.09:
-                    step_reward = round(step_reward / 0.1) * 0.1
-                else:
-                    step_reward = 0.0
-                episode_reward += step_reward
-                steps += 1
-
-            total_rewards.append(episode_reward)
-            total_lengths.append(steps)
+        rewards.append(total_reward)
 
     env.close()
-
-    return {
-        'mean_reward': np.mean(total_rewards),
-        'std_reward': np.std(total_rewards),
-        'mean_length': np.mean(total_lengths),
-        'std_length': np.std(total_lengths)
-    }
+    return float(np.mean(rewards)), float(np.std(rewards))
 
 
-def save_checkpoint(model, optimizer, episode, best_reward, checkpoint_dir, filename):
-    """Save RL training checkpoint."""
+def save_checkpoint(model, target_model, optimizer, episode, best_reward, checkpoint_dir, filename):
     checkpoint = {
         'model_state_dict': model.state_dict(),
+        'target_state_dict': target_model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'episode': episode,
         'best_reward': best_reward,
-        'timestamp': datetime.now().isoformat()
     }
     path = os.path.join(checkpoint_dir, filename)
     torch.save(checkpoint, path)
     return path
 
 
-def load_checkpoint(checkpoint_path, model, optimizer=None, device='cpu'):
-    """Load training checkpoint or model weights."""
+def load_checkpoint(checkpoint_path, model, target_model, optimizer, device):
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-
-    # Handle both full checkpoints and model-only weights
-    if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-        if optimizer and 'optimizer_state_dict' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        return checkpoint
-    else:
-        # Just model weights
-        model.load_state_dict(checkpoint)
-        return {'episode': 0, 'best_reward': -float('inf')}
+    model.load_state_dict(checkpoint['model_state_dict'])
+    target_model.load_state_dict(checkpoint['target_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    return checkpoint
 
 
 def train_rl(
     model_path=None,
     checkpoint=None,
-    n_episodes=1000,
-    temperature=1.0,
-    lr=1e-4,
-    gamma=0.99,
-    entropy_coef=0.01,
+    n_episodes=500,
     device='cpu',
+    batch_size=128,
+    buffer_size=100000,
+    min_buffer=2000,
+    gamma=0.99,
+    lr=1e-4,
+    epsilon_start=0.2,
+    epsilon_end=0.01,
+    epsilon_decay=0.5,
+    target_update=1000,
+    eval_frequency=25,
+    eval_episodes=5,
     checkpoint_dir='checkpoints_rl',
-    save_frequency=100,
-    eval_frequency=50,
-    eval_episodes=10,
-    line_clear_bonus=50.0,
-    credit_window=10,
-    credit_decay=0.7,
-    normalize_rewards=False
+    save_frequency=50,
 ):
-    """
-    Train model with reinforcement learning.
+    """Main Q-learning training loop."""
 
-    Args:
-        model_path: Path to pretrained model weights (for starting from supervised)
-        checkpoint: Path to RL checkpoint to resume from
-        n_episodes: Number of episodes to train
-        temperature: Sampling temperature
-        lr: Learning rate
-        gamma: Discount factor
-        entropy_coef: Entropy regularization coefficient
-        device: cpu or cuda
-        checkpoint_dir: Directory to save checkpoints
-        save_frequency: Save checkpoint every N episodes
-        eval_frequency: Evaluate model every N episodes
-        eval_episodes: Number of episodes for evaluation
-        line_clear_bonus: Bonus reward per line cleared (default: 50.0)
-        credit_window: Number of past actions to credit (default: 10)
-        credit_decay: Exponential decay for backward credit (default: 0.7)
-        normalize_rewards: Normalize rewards for training stability (default: False)
-    """
     device = torch.device(device)
-
-    # Create directories
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs('models', exist_ok=True)
 
-    # Initialize model
-    model = TetrisCNN(n_rows=20, n_cols=10, n_actions=7).to(device)
-    trainer = RLTrainer(model, device, lr=lr, gamma=gamma, entropy_coef=entropy_coef)
+    model = TetrisQNetwork().to(device)
+    trainer = QLearningTrainer(
+        model,
+        device,
+        lr=lr,
+        gamma=gamma,
+        buffer_size=buffer_size,
+        min_buffer=min_buffer,
+    )
 
-    # Training state
     start_episode = 0
     best_reward = -float('inf')
 
-    # Load checkpoint or pretrained model
+    if model_path:
+        print(f"Loading supervised weights from {model_path}")
+        state_dict = torch.load(model_path, map_location=device, weights_only=False)
+        if isinstance(state_dict, dict) and 'model_state_dict' in state_dict:
+            model.load_state_dict(state_dict['model_state_dict'])
+        else:
+            model.load_state_dict(state_dict)
+        trainer.update_target()
+
     if checkpoint:
-        print(f"\nLoading RL checkpoint: {checkpoint}")
-        ckpt = load_checkpoint(checkpoint, model, trainer.optimizer, device)
+        print(f"Resuming from checkpoint {checkpoint}")
+        ckpt = load_checkpoint(checkpoint, model, trainer.target_model, trainer.optimizer, device)
         start_episode = ckpt.get('episode', 0) + 1
         best_reward = ckpt.get('best_reward', -float('inf'))
-        print(f"Resuming from episode {start_episode}")
-        print(f"Best reward so far: {best_reward:.2f}")
-    elif model_path:
-        print(f"\nLoading pretrained model: {model_path}")
-        load_checkpoint(model_path, model, None, device)
-        print("Starting RL training from supervised model")
-    else:
-        print("\nWarning: Training from scratch (no pretrained model)")
-
-    # Training info
-    print(f"\n{'='*70}")
-    print(f"RL Training Configuration")
-    print(f"{'='*70}")
-    print(f"Device: {device}")
-    print(f"Episodes: {n_episodes}")
-    print(f"Learning rate: {lr}")
-    print(f"Gamma: {gamma}")
-    print(f"Entropy coefficient: {entropy_coef}")
-    print(f"Temperature: {temperature}")
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-    print(f"{'='*70}\n")
-
-    # Track metrics
-    episode_rewards = deque(maxlen=100)
-    episode_shaped_rewards = deque(maxlen=100)
-    episode_lengths = deque(maxlen=100)
-    episode_losses = deque(maxlen=100)
 
     env = tetris.Tetris()
+    global_step = 0
 
     for episode in range(start_episode, n_episodes):
         obs, _ = env.reset()
-        trainer.reset_episode()
-
+        board_empty, board_filled = extract_boards(obs[0])
         done = False
-        episode_reward = 0
-        episode_shaped_reward = 0
-        steps = 0
+        episode_reward = 0.0
 
-        # Play episode
-        model.train()
+        frac = episode / max(1, n_episodes - 1)
+        epsilon = max(epsilon_end, epsilon_start - frac * (epsilon_start - epsilon_end) * epsilon_decay)
+
         while not done:
-            # Select action
-            board_empty, board_filled = prepare_board_inputs(obs, device)
-            action = trainer.select_action(board_empty, board_filled, temperature=temperature)
-
-            # Step environment
-            obs, reward, terminated, truncated, info = env.step([action])
+            action = trainer.select_action(board_empty, board_filled, epsilon)
+            next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
+            next_empty, next_filled = extract_boards(next_obs[0])
+            reward_value = float(reward[0])
 
-            # Infer lines cleared from reward
-            step_reward = round(reward[0], 2)
-            if step_reward >= 0.99:
-                lines_just_cleared = 4
-            elif step_reward >= 0.49:
-                lines_just_cleared = 3
-            elif step_reward >= 0.29:
-                lines_just_cleared = 2
-            elif step_reward >= 0.09:
-                lines_just_cleared = 1
-            else:
-                lines_just_cleared = 0
+            trainer.store((board_empty, board_filled, action, reward_value, next_empty, next_filled, float(done)))
+            loss = trainer.optimize(batch_size)
 
-            # Apply reward shaping: bonus for line clears, propagated backwards
-            shaped_reward = reward[0]
-            if lines_just_cleared > 0:
-                # Give bonus to this action
-                shaped_reward += line_clear_bonus * lines_just_cleared
+            board_empty, board_filled = next_empty, next_filled
+            episode_reward += reward_value
+            global_step += 1
 
-                # Propagate credit backwards to recent actions with decay
-                num_recent = min(credit_window, len(trainer.rewards))
-                for i in range(1, num_recent + 1):
-                    bonus = line_clear_bonus * lines_just_cleared * (credit_decay ** i)
-                    trainer.rewards[-i] += bonus
+            if global_step % target_update == 0:
+                trainer.update_target()
 
-            # Store reward
-            trainer.store_reward(shaped_reward)
-            episode_reward += reward[0]  # Track original reward for logging
-            episode_shaped_reward += shaped_reward  # Track shaped reward for logging
-            steps += 1
-
-        # Normalize rewards for stability
-        if normalize_rewards and len(trainer.rewards) > 1:
-            rewards_array = np.array(trainer.rewards)
-            mean_r = rewards_array.mean()
-            std_r = rewards_array.std()
-            if std_r > 0:
-                trainer.rewards = ((rewards_array - mean_r) / std_r).tolist()
-
-        # Update policy
-        loss = trainer.update()
-
-        episode_rewards.append(episode_reward)
-        episode_shaped_rewards.append(episode_shaped_reward)
-        episode_lengths.append(steps)
-        episode_losses.append(loss)
-
-        # Logging
-        if (episode + 1) % 10 == 0:
-            avg_reward = np.mean(episode_rewards)
-            avg_shaped_reward = np.mean(episode_shaped_rewards)
-            avg_length = np.mean(episode_lengths)
-            avg_loss = np.mean(episode_losses)
-            print(f"Episode {episode+1}/{n_episodes}: "
-                  f"Reward: {avg_reward:.2f} (Shaped: {avg_shaped_reward:.2f}), "
-                  f"Length: {avg_length:.0f}, Loss: {avg_loss:.4f}")
-
-        # Evaluation
         if (episode + 1) % eval_frequency == 0:
-            print(f"\nEvaluating at episode {episode+1}...")
-            eval_metrics = evaluate_model(model, device, n_episodes=eval_episodes)
-            print(f"  Reward: {eval_metrics['mean_reward']:.2f} ± {eval_metrics['std_reward']:.2f}")
-            print(f"  Length: {eval_metrics['mean_length']:.0f} ± {eval_metrics['std_length']:.0f}")
+            mean_reward, std_reward = evaluate_model(trainer.model, device, eval_episodes)
+            print(f"Episode {episode + 1}/{n_episodes} | Eval reward: {mean_reward:.2f} ± {std_reward:.2f}")
+            if mean_reward > best_reward:
+                best_reward = mean_reward
+                save_checkpoint(trainer.model, trainer.target_model, trainer.optimizer, episode, best_reward, checkpoint_dir, 'best.pt')
 
-            # Save best model
-            if eval_metrics['mean_reward'] > best_reward:
-                best_reward = eval_metrics['mean_reward']
-                save_checkpoint(
-                    model, trainer.optimizer, episode, best_reward,
-                    checkpoint_dir, 'best_rl.pt'
-                )
-                print(f"  -> Saved best RL model (reward: {best_reward:.2f})")
-
-        # Save periodic checkpoint
         if (episode + 1) % save_frequency == 0:
-            filename = f'checkpoint_rl_ep{episode+1:04d}.pt'
-            save_checkpoint(
-                model, trainer.optimizer, episode, best_reward,
-                checkpoint_dir, filename
-            )
-            print(f"Checkpoint saved: {filename}")
+            save_checkpoint(trainer.model, trainer.target_model, trainer.optimizer, episode, best_reward, checkpoint_dir, f'episode_{episode+1}.pt')
+
+        print(f"Episode {episode + 1}: reward={episode_reward:.2f}, epsilon={epsilon:.3f}, buffer={len(trainer.replay_buffer)}")
 
     env.close()
 
-    # Save final checkpoint
-    save_checkpoint(
-        model, trainer.optimizer, n_episodes - 1, best_reward,
-        checkpoint_dir, 'final_rl.pt'
-    )
-
-    # Save final model weights only (for easy loading)
-    torch.save(model.state_dict(), 'models/cnn_agent_rl.pt')
-
-    print(f"\n{'='*70}")
-    print("RL Training Complete!")
-    print(f"{'='*70}")
-    print(f"Best reward: {best_reward:.2f}")
-    print(f"Checkpoints saved to: {checkpoint_dir}/")
-    print(f"Final model saved to: models/cnn_agent_rl.pt")
+    final_path = 'models/q_value_agent_rl.pt'
+    torch.save(trainer.model.state_dict(), final_path)
+    print(f"Training complete. Final RL model saved to {final_path}")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Train CNN agent with reinforcement learning (REINFORCE)'
-    )
-
-    # Model loading
-    parser.add_argument('--model', type=str, default=None,
-                        help='Path to pretrained model weights (e.g., from supervised training)')
+    parser = argparse.ArgumentParser(description='RL fine-tuning for the Q-value agent (TD learning)')
+    parser.add_argument('--model-path', type=str, default=None,
+                        help='Path to supervised model weights to initialize from')
     parser.add_argument('--checkpoint', type=str, default=None,
-                        help='Path to RL checkpoint to resume from')
-    parser.add_argument('--device', type=str, default='cpu',
-                        choices=['cpu', 'cuda'],
-                        help='Device to use for training')
-
-    # Training schedule
-    parser.add_argument('--episodes', type=int, default=1000,
-                        help='Number of training episodes')
-    parser.add_argument('--eval-frequency', type=int, default=50,
-                        help='Evaluate every N episodes')
-    parser.add_argument('--eval-episodes', type=int, default=10,
-                        help='Number of episodes for evaluation')
-
-    # RL hyperparameters
-    parser.add_argument('--lr', type=float, default=1e-4,
-                        help='Learning rate')
+                        help='Resume RL training from checkpoint')
+    parser.add_argument('--episodes', type=int, default=500,
+                        help='Number of RL episodes to run')
+    parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda'],
+                        help='Torch device to use')
+    parser.add_argument('--batch-size', type=int, default=128,
+                        help='Batch size for TD updates')
+    parser.add_argument('--buffer-size', type=int, default=100000,
+                        help='Replay buffer capacity')
+    parser.add_argument('--min-buffer', type=int, default=2000,
+                        help='Samples required before training starts')
     parser.add_argument('--gamma', type=float, default=0.99,
                         help='Discount factor')
-    parser.add_argument('--entropy-coef', type=float, default=0.01,
-                        help='Entropy regularization coefficient')
-    parser.add_argument('--temperature', type=float, default=1.0,
-                        help='Sampling temperature')
-
-    # Checkpointing
+    parser.add_argument('--lr', type=float, default=1e-4,
+                        help='Learning rate')
+    parser.add_argument('--epsilon-start', type=float, default=0.2,
+                        help='Starting epsilon for exploration')
+    parser.add_argument('--epsilon-end', type=float, default=0.01,
+                        help='Final epsilon for exploration')
+    parser.add_argument('--epsilon-decay', type=float, default=0.5,
+                        help='Fraction of training used to decay epsilon')
+    parser.add_argument('--target-update', type=int, default=1000,
+                        help='Target network update frequency (steps)')
+    parser.add_argument('--eval-frequency', type=int, default=25,
+                        help='Evaluate model every N episodes')
+    parser.add_argument('--eval-episodes', type=int, default=5,
+                        help='Episodes per evaluation run')
     parser.add_argument('--checkpoint-dir', type=str, default='checkpoints_rl',
-                        help='Directory to save checkpoints')
-    parser.add_argument('--save-frequency', type=int, default=100,
+                        help='Directory for RL checkpoints')
+    parser.add_argument('--save-frequency', type=int, default=50,
                         help='Save checkpoint every N episodes')
-
-    # Reward shaping
-    parser.add_argument('--line-clear-bonus', type=float, default=50.0,
-                        help='Bonus reward per line cleared')
-    parser.add_argument('--credit-window', type=int, default=10,
-                        help='Number of past actions to credit for line clears')
-    parser.add_argument('--credit-decay', type=float, default=0.7,
-                        help='Decay factor for backward credit assignment')
-    parser.add_argument('--normalize-rewards', action='store_true',
-                        help='Enable reward normalization (may flatten shaping)')
 
     args = parser.parse_args()
 
     train_rl(
-        model_path=args.model,
+        model_path=args.model_path,
         checkpoint=args.checkpoint,
         n_episodes=args.episodes,
-        temperature=args.temperature,
-        lr=args.lr,
-        gamma=args.gamma,
-        entropy_coef=args.entropy_coef,
         device=args.device,
-        checkpoint_dir=args.checkpoint_dir,
-        save_frequency=args.save_frequency,
+        batch_size=args.batch_size,
+        buffer_size=args.buffer_size,
+        min_buffer=args.min_buffer,
+        gamma=args.gamma,
+        lr=args.lr,
+        epsilon_start=args.epsilon_start,
+        epsilon_end=args.epsilon_end,
+        epsilon_decay=args.epsilon_decay,
+        target_update=args.target_update,
         eval_frequency=args.eval_frequency,
         eval_episodes=args.eval_episodes,
-        line_clear_bonus=args.line_clear_bonus,
-        credit_window=args.credit_window,
-        credit_decay=args.credit_decay,
-        normalize_rewards=args.normalize_rewards
+        checkpoint_dir=args.checkpoint_dir,
+        save_frequency=args.save_frequency,
     )
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

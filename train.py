@@ -1,7 +1,7 @@
 """
-Train CNN agent using on-policy data collection with teacher supervision.
+Supervised pretraining for the unified Q-value agent using teacher supervision.
 
-The student (CNN agent) collects data by playing, and the teacher provides
+The student (Q-value agent) collects data by playing, and the teacher provides
 the correct action labels. This addresses distribution shift by training on
 states the student actually encounters.
 """
@@ -14,12 +14,11 @@ import numpy as np
 from tqdm import tqdm
 import argparse
 import os
-import json
 from datetime import datetime
 
 from pufferlib.ocean.tetris import tetris
 from agents.heuristic_agent import HeuristicAgent
-from agents.cnn_agent import CNNAgent, TetrisCNN
+from agents.q_agent import QValueAgent, TetrisQNetwork
 
 
 class TetrisDataset(Dataset):
@@ -41,15 +40,23 @@ class TetrisDataset(Dataset):
         )
 
 
-def collect_data(student_agent, teacher_agent, n_episodes=10, exploration_prob=0.5, verbose=True):
+def collect_data(
+    student_agent,
+    teacher_agent,
+    n_episodes=10,
+    exploration_prob=0.5,
+    random_prob=0.1,
+    verbose=True,
+):
     """
     Collect training data: student acts, teacher labels.
 
     Args:
-        student_agent: CNNAgent that acts in the environment
+        student_agent: QValueAgent that acts in the environment
         teacher_agent: Teacher agent (e.g., HeuristicAgent) that provides labels
         n_episodes: Number of episodes to collect
         exploration_prob: Probability of taking teacher action instead of student action
+        random_prob: Probability of forcing a random action for extra coverage
         verbose: Print progress
 
     Returns:
@@ -67,8 +74,14 @@ def collect_data(student_agent, teacher_agent, n_episodes=10, exploration_prob=0
 
     student_agent.model.eval()
 
+    if random_prob + exploration_prob > 1.0:
+        raise ValueError("exploration_prob + random_prob must be <= 1.0")
+
     if verbose:
-        print(f"Collecting data (exploration={exploration_prob:.2f}) from {n_episodes} episodes...")
+        print(
+            f"Collecting data (teacher={exploration_prob:.2f}, random={random_prob:.2f}) "
+            f"from {n_episodes} episodes..."
+        )
 
     for episode in tqdm(range(n_episodes), disable=not verbose):
         obs, _ = env.reset()
@@ -95,12 +108,13 @@ def collect_data(student_agent, teacher_agent, n_episodes=10, exploration_prob=0
             actions.append(teacher_action)
 
             # Decide which action to take in environment
-            if np.random.random() < exploration_prob:
-                # Take teacher action (exploration)
+            roll = np.random.random()
+            if roll < random_prob:
+                action_to_take = np.random.randint(0, 7)
+            elif roll < random_prob + exploration_prob:
                 action_to_take = teacher_action
             else:
-                # Take student action (on-policy)
-                action_to_take = student_agent.choose_action(obs[0], deterministic=False)
+                action_to_take = student_agent.choose_action(obs[0], epsilon=0.1, deterministic=False)
 
             # Step environment
             obs, reward, terminated, truncated, info = env.step([action_to_take])
@@ -265,6 +279,7 @@ def train(
     val_split=0.2,
     initial_exploration=0.9,
     final_exploration=0.1,
+    random_action_prob=0.1,
     checkpoint_dir='checkpoints',
     save_frequency=1
 ):
@@ -283,6 +298,7 @@ def train(
         val_split: Validation split ratio
         initial_exploration: Starting exploration probability (teacher action rate)
         final_exploration: Final exploration probability
+        random_action_prob: Probability of forcing a random environment action
         checkpoint_dir: Directory to save checkpoints
         save_frequency: Save checkpoint every N iterations
     """
@@ -293,7 +309,7 @@ def train(
     os.makedirs('models', exist_ok=True)
 
     # Initialize model
-    model = TetrisCNN(n_rows=20, n_cols=10, n_actions=7).to(device)
+    model = TetrisQNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.5, patience=3
@@ -301,7 +317,7 @@ def train(
     criterion = nn.CrossEntropyLoss()
 
     # Initialize agents
-    student_agent = CNNAgent(device=str(device))
+    student_agent = QValueAgent(device=str(device))
     student_agent.model = model
 
     if teacher_type == 'heuristic':
@@ -342,6 +358,7 @@ def train(
     print(f"Batch size: {batch_size}")
     print(f"Learning rate: {lr}")
     print(f"Exploration: {initial_exploration:.2f} -> {final_exploration:.2f}")
+    print(f"Random action prob: {random_action_prob:.2f}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"{'='*70}\n")
 
@@ -361,6 +378,7 @@ def train(
             student_agent, teacher_agent,
             n_episodes=episodes_per_iter,
             exploration_prob=exploration,
+            random_prob=random_action_prob,
             verbose=True
         )
 
@@ -451,7 +469,8 @@ def train(
     )
 
     # Save final model weights only (for easy loading)
-    torch.save(model.state_dict(), 'models/cnn_agent.pt')
+    final_model_path = 'models/q_value_agent.pt'
+    torch.save(model.state_dict(), final_model_path)
 
     print(f"\n{'='*70}")
     print("Training Complete!")
@@ -460,12 +479,12 @@ def train(
     print(f"Best evaluation reward: {best_metrics['eval_reward']:.2f}")
     print(f"Total dataset size: {len(all_actions):,} samples")
     print(f"Checkpoints saved to: {checkpoint_dir}/")
-    print(f"Final model saved to: models/cnn_agent.pt")
+    print(f"Final model saved to: {final_model_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Train CNN agent with on-policy data collection'
+        description='Supervised pretraining for the unified Q-value agent'
     )
 
     # Model and training
@@ -498,6 +517,8 @@ def main():
                         help='Initial exploration probability (teacher action rate)')
     parser.add_argument('--final-exploration', type=float, default=0.1,
                         help='Final exploration probability')
+    parser.add_argument('--random-action-prob', type=float, default=0.1,
+                        help='Probability of forcing a random action during data collection')
 
     # Checkpointing
     parser.add_argument('--checkpoint-dir', type=str, default='checkpoints',
@@ -519,6 +540,7 @@ def main():
         val_split=args.val_split,
         initial_exploration=args.initial_exploration,
         final_exploration=args.final_exploration,
+        random_action_prob=args.random_action_prob,
         checkpoint_dir=args.checkpoint_dir,
         save_frequency=args.save_frequency
     )

@@ -11,21 +11,21 @@ A rule-based agent that uses heuristics to play Tetris:
 - Uses heuristics (height, holes, bumpiness) to break ties
 - Achieves ~4368 steps and 39.24 reward per episode
 
-### 2. CNN Agent
-A learned agent using a convolutional neural network:
+### 2. Q-Value Agent
+A unified neural agent that predicts action values:
 - Dual-input CNN architecture (piece as empty + piece as filled)
-- Shared CNN backbone with MLP head
-- Can be trained via supervised learning (imitation) then fine-tuned with RL
+- Outputs 7 Q-values that can be treated as logits during imitation
+- Trained via supervised teacher forcing, then fine-tuned with TD learning
 
 ### 3. Hybrid Agent
-A hybrid agent that combines both CNN and heuristic approaches:
-- Randomly chooses between CNN and heuristic policies with 50/50 probability
+A hybrid agent that mixes Q-value and heuristic policies:
+- Randomly chooses between the learned Q-value policy, heuristic policy, and optional random actions
 - Useful for exploring hybrid strategies and comparing agent behaviors
 - Tracks usage statistics to show how often each policy is selected
 
 ## Training
 
-Train the CNN agent using on-policy data collection with teacher supervision:
+Train the Q-value agent using on-policy data collection with teacher supervision:
 
 ```bash
 # Train from scratch (default settings)
@@ -43,10 +43,10 @@ python train.py --checkpoint checkpoints/checkpoint_iter005.pt
 
 ### How It Works
 
-The training addresses **distribution shift** by having the student (CNN) collect its own data:
+The training addresses **distribution shift** by having the student (Q-value agent) collect its own data:
 
 1. **Data Collection**: Student agent plays episodes while teacher (heuristic agent) labels the states
-2. **Training**: CNN trains on aggregate dataset for several epochs
+2. **Training**: Q-value network trains on aggregate dataset for several epochs
 3. **Evaluation**: Agent performance measured in actual gameplay
 4. **Checkpointing**: Regular checkpoints saved for resuming training
 
@@ -60,6 +60,7 @@ The exploration probability (how often the teacher action is taken) decays from 
 - `--episodes`: Episodes per iteration (default: `20`)
 - `--epochs`: Training epochs per iteration (default: `10`)
 - `--device`: `cpu` or `cuda` (default: `cpu`)
+- `--random-action-prob`: Probability of forcing random actions during data collection (default: `0.1`)
 - `--save-frequency`: Save checkpoint every N iterations (default: `1`)
 
 See [TRAINING.md](TRAINING.md) for full documentation.
@@ -69,7 +70,8 @@ See [TRAINING.md](TRAINING.md) for full documentation.
 - `checkpoints/best_val.pt`: Best validation accuracy model
 - `checkpoints/best_performance.pt`: Best evaluation reward model
 - `checkpoints/checkpoint_iterXXX.pt`: Periodic iteration checkpoints
-- `models/cnn_agent.pt`: Final trained model (weights only)
+- `models/q_value_agent.pt`: Final supervised model (weights only)
+- `models/q_value_agent_rl.pt`: RL fine-tuned weights
 
 ## Running Agents
 
@@ -79,35 +81,35 @@ See [TRAINING.md](TRAINING.md) for full documentation.
 python main.py --agent heuristic --episodes 3
 ```
 
-### CNN Agent
+### Q-Value Agent (aliases: `cnn`, `value`)
 
 ```bash
 # Random initialization
-python main.py --agent cnn --episodes 3
+python main.py --agent q --episodes 3
 
 # With trained model
-python main.py --agent cnn --model-path models/cnn_agent_best.pt --episodes 3
+python main.py --agent q --model-path models/q_value_agent.pt --episodes 3
 ```
 
 ### Hybrid Agent
 
 ```bash
-# With random CNN initialization
+# With random Q-value initialization
 python main.py --agent hybrid --episodes 3
 
-# With trained CNN model
-python main.py --agent hybrid --model-path models/cnn_agent_best.pt --episodes 3
+# With trained Q-value model
+python main.py --agent hybrid --model-path models/q_value_agent.pt --episodes 3
 ```
 
-The hybrid agent will display usage statistics showing how many times each policy (CNN vs Heuristic) was selected.
+The hybrid agent will display usage statistics showing how many times each policy (Q-value vs Heuristic) was selected.
 
 Options:
-- `--agent`: Agent type (heuristic, cnn, or hybrid)
+- `--agent`: Agent type (heuristic, q/cnn/value, or hybrid)
 - `--episodes`: Number of episodes to run
-- `--model-path`: Path to CNN model weights (for cnn or hybrid agent)
+- `--model-path`: Path to Q-value model weights (for q/cnn/value or hybrid agent)
 - `--render`: Render the game (warning: slow)
 
-## CNN Architecture
+## Q-Value CNN Architecture
 
 ```
 Input: Two 20x10 boards
@@ -124,9 +126,9 @@ Feature Concatenation: [features_empty, features_filled]
 MLP Head:
 ├── Linear(25600, 256) + ReLU + Dropout(0.3)
 ├── Linear(256, 128) + ReLU + Dropout(0.3)
-└── Linear(128, 7) -> Action logits
+└── Linear(128, 7) -> Action values
 
-Output: Softmax over 7 actions
+Output: 7 Q-values (treated as logits during imitation learning)
 ```
 
 Total parameters: ~6.7M
@@ -141,12 +143,12 @@ Total parameters: ~6.7M
 - Dropout: 0.3
 
 ### Reinforcement Learning
-- Algorithm: REINFORCE (policy gradient)
+- Algorithm: TD learning with replay + target network (Q-learning)
 - Learning rate: 1e-4
 - Discount factor (γ): 0.99
-- Entropy coefficient: 0.01
-- Gradient clipping: max_norm=1.0
-- Optimizer: Adam
+- Replay buffer: 100k transitions, 2k warm-up
+- Exploration: epsilon-greedy (0.2 → 0.01)
+- Target update: every 1000 environment steps
 
 ## Directory Structure
 
@@ -155,15 +157,16 @@ tetris-rl/
 ├── agents/
 │   ├── __init__.py
 │   ├── heuristic_agent.py    # Rule-based agent
-│   ├── cnn_agent.py           # CNN-based agent
-│   └── hybrid_agent.py        # Hybrid CNN/heuristic agent
+│   ├── q_agent.py            # Unified Q-value agent
+│   └── hybrid_agent.py       # Hybrid Q/heuristic agent
 ├── models/                    # Saved model checkpoints
 ├── checkpoints/               # Training checkpoints
 ├── archive/                   # Old training scripts
 ├── models_archive/            # Old model files
 ├── base_agent.py              # Base agent class
 ├── main.py                    # Run agents
-├── train.py                   # Training script
+├── train.py                   # Supervised pretraining
+├── train_rl.py                # Q-learning fine-tuning
 ├── TRAINING.md                # Training documentation
 └── README.md
 ```

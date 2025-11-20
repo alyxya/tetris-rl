@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `train.py` script trains a CNN agent using on-policy data collection with teacher supervision. The student (CNN agent) collects data by playing Tetris, and the teacher (heuristic agent by default) provides the correct action labels. This addresses distribution shift by training on states the student actually encounters.
+`train.py` performs supervised pretraining for the unified Q-value agent. The student collects its own experience in the PufferLib Tetris environment while a heuristic teacher labels every state with the desired action. Random actions are occasionally injected so the dataset captures a diverse set of boards. The resulting model already ranks actions reasonably well, which makes it an ideal starting point for RL fine-tuning.
 
 ## Quick Start
 
@@ -18,92 +18,55 @@ python train.py --checkpoint checkpoints/checkpoint_iter005.pt
 
 ## Training Process
 
-1. **Data Collection**: Student agent plays episodes, teacher labels the states
-2. **Training**: CNN trains on aggregate dataset for several epochs
-3. **Evaluation**: Agent performance measured in actual gameplay
-4. **Checkpointing**: Regular checkpoints saved for resuming
+1. **Data collection** – Student agent acts in the environment. Each step is labeled by the teacher and optionally perturbed by random actions.
+2. **Supervised update** – The Q-network trains with cross-entropy on aggregated `(state, action)` pairs, treating the Q-values as logits.
+3. **Evaluation & checkpointing** – After each iteration we evaluate the greedy policy, log metrics, and save checkpoints.
 
-The exploration probability (how often the teacher action is taken during data collection) decays linearly from 0.9 to 0.1 over iterations, allowing the student to gradually take control.
+Teacher usage decays from `--initial-exploration` to `--final-exploration`, while `--random-action-prob` controls the amount of purely random actions during data collection.
 
 ## Arguments
 
 ### Model and Training
-- `--teacher`: Teacher agent type (default: `heuristic`)
-- `--checkpoint`: Path to checkpoint to resume from
-- `--device`: Device to use (`cpu` or `cuda`, default: `cpu`)
+- `--teacher`: Teacher agent type (default `heuristic`)
+- `--checkpoint`: Resume from checkpoint file
+- `--device`: `cpu` or `cuda`
 
 ### Training Schedule
-- `--iterations`: Number of data collection iterations (default: `10`)
-- `--episodes`: Episodes to collect per iteration (default: `20`)
-- `--epochs`: Training epochs per iteration (default: `10`)
+- `--iterations`: Data collection iterations (default `10`)
+- `--episodes`: Episodes per iteration (default `20`)
+- `--epochs`: Training epochs per iteration (default `10`)
 
 ### Hyperparameters
-- `--batch-size`: Batch size for training (default: `128`)
-- `--lr`: Learning rate (default: `1e-3`)
-- `--val-split`: Validation split ratio (default: `0.2`)
+- `--batch-size`: Batch size (default `128`)
+- `--lr`: Learning rate (default `1e-3`)
+- `--val-split`: Validation ratio (default `0.2`)
 
-### Exploration Schedule
-- `--initial-exploration`: Initial exploration probability (default: `0.9`)
-- `--final-exploration`: Final exploration probability (default: `0.1`)
+### Exploration Mix
+- `--initial-exploration`: Initial probability of executing teacher action (default `0.9`)
+- `--final-exploration`: Final probability of executing teacher action (default `0.1`)
+- `--random-action-prob`: Probability of forcing a random action (default `0.1`)
 
 ### Checkpointing
-- `--checkpoint-dir`: Directory to save checkpoints (default: `checkpoints`)
-- `--save-frequency`: Save checkpoint every N iterations (default: `1`)
+- `--checkpoint-dir`: Directory for supervised checkpoints (default `checkpoints`)
+- `--save-frequency`: Save checkpoint every N iterations (default `1`)
 
-## Examples
+## Outputs
 
-### Quick training run (for testing)
-```bash
-python train.py --iterations 3 --episodes 10 --epochs 5
-```
-
-### Long training run with CUDA
-```bash
-python train.py --iterations 20 --episodes 50 --epochs 15 --device cuda
-```
-
-### Resume training with different hyperparameters
-```bash
-python train.py --checkpoint checkpoints/checkpoint_iter010.pt --iterations 20 --lr 5e-4
-```
-
-### Adjust exploration schedule
-```bash
-python train.py --initial-exploration 1.0 --final-exploration 0.0
-```
-
-## Checkpoints
-
-Checkpoints are saved to the `checkpoints/` directory:
-
-- `best_val.pt`: Best validation accuracy model
-- `best_performance.pt`: Best evaluation reward model
-- `checkpoint_iterXXX.pt`: Periodic iteration checkpoints
-- `final.pt`: Final training checkpoint
-
-Each checkpoint contains:
-- Model weights
-- Optimizer state
-- Scheduler state
-- Training iteration and epoch
-- Best metrics achieved
-- Dataset size
-- Timestamp
-
-## Output
-
-The final trained model is saved to `models/cnn_agent.pt` (weights only, for easy loading with `CNNAgent`).
+- `checkpoints/best_val.pt`: Best validation accuracy
+- `checkpoints/best_performance.pt`: Best evaluation reward
+- `checkpoints/checkpoint_iterXXX.pt`: Iteration snapshots
+- `models/q_value_agent.pt`: Final supervised weights
 
 ## Loading a Trained Model
 
 ```python
-from agents.cnn_agent import CNNAgent
+import torch
+from agents.q_agent import QValueAgent
 
-# Load final model
-agent = CNNAgent(device='cpu', model_path='models/cnn_agent.pt')
+agent = QValueAgent(device='cpu', model_path='models/q_value_agent.pt')
 
-# Or load from checkpoint
-agent = CNNAgent(device='cpu')
+# Or load from a checkpoint manually
+agent = QValueAgent(device='cpu')
 checkpoint = torch.load('checkpoints/best_performance.pt', weights_only=False)
 agent.model.load_state_dict(checkpoint['model_state_dict'])
 ```
@@ -112,102 +75,52 @@ agent.model.load_state_dict(checkpoint['model_state_dict'])
 
 # Reinforcement Learning Fine-tuning
 
-After supervised training, you can fine-tune the model with pure RL (REINFORCE) to potentially surpass the teacher's performance.
+`train_rl.py` continues training with Q-learning (TD updates, replay buffer, and target network). It learns directly from the default environment reward and refines the Q-values learned during supervision.
 
 ## Quick Start
 
-### Train from supervised model
+### Fine-tune from supervised weights
 ```bash
-python train_rl.py --model models/cnn_agent.pt --episodes 500
+python train_rl.py --model-path models/q_value_agent.pt --episodes 500
 ```
 
-### Resume from RL checkpoint
+### Resume RL from checkpoint
 ```bash
-python train_rl.py --checkpoint checkpoints_rl/checkpoint_rl_ep0200.pt --episodes 1000
+python train_rl.py --checkpoint checkpoints_rl/episode_0500.pt --episodes 1000
 ```
 
-## RL Training Process
+## RL Process
 
-1. **Agent plays episode**: Uses current policy to play Tetris
-2. **Collects rewards**: Environment provides reward signal
-3. **Policy update**: REINFORCE updates policy to maximize expected rewards
-4. **No teacher**: Learns purely from game rewards, independent of heuristic
+1. **Act with epsilon-greedy policy** – Start near-greedy and decay epsilon to 0.01.
+2. **Store transitions** – Push `(s, a, r, s', done)` tuples into the replay buffer.
+3. **TD updates** – Sample mini-batches, minimize MSE between predicted Q-values and TD targets.
+4. **Target network** – Periodically sync a target network for stability.
 
-## Arguments
+## RL Arguments
 
-### Model Loading
-- `--model`: Path to pretrained model (from supervised training)
-- `--checkpoint`: Path to RL checkpoint to resume from
-- `--device`: Device to use (`cpu` or `cuda`, default: `cpu`)
+- `--model-path`: Optional supervised weights to bootstrap from
+- `--checkpoint`: Resume RL training
+- `--episodes`: Number of RL episodes (default `500`)
+- `--device`: `cpu` or `cuda`
+- `--batch-size`: TD batch size (default `128`)
+- `--buffer-size`: Replay buffer capacity (default `100000`)
+- `--min-buffer`: Samples required before updates (default `2000`)
+- `--gamma`: Discount factor (default `0.99`)
+- `--lr`: Learning rate (default `1e-4`)
+- `--epsilon-start` / `--epsilon-end` / `--epsilon-decay`: Exploration schedule
+- `--target-update`: Frequency (in steps) to sync the target network
+- `--eval-frequency`: Evaluate greedy policy every N episodes
+- `--eval-episodes`: Episodes per evaluation run
+- `--checkpoint-dir`: Directory for RL checkpoints (default `checkpoints_rl`)
+- `--save-frequency`: Save checkpoint every N episodes
 
-### Training Schedule
-- `--episodes`: Number of training episodes (default: `1000`)
-- `--eval-frequency`: Evaluate every N episodes (default: `50`)
-- `--eval-episodes`: Number of episodes for evaluation (default: `10`)
+## Outputs
 
-### RL Hyperparameters
-- `--lr`: Learning rate (default: `1e-4`)
-- `--gamma`: Discount factor for returns (default: `0.99`)
-- `--entropy-coef`: Entropy regularization coefficient (default: `0.01`)
-- `--temperature`: Sampling temperature (default: `1.0`)
-
-### Checkpointing
-- `--checkpoint-dir`: Directory to save checkpoints (default: `checkpoints_rl`)
-- `--save-frequency`: Save checkpoint every N episodes (default: `100`)
-
-## Examples
-
-### Quick RL test (100 episodes)
-```bash
-python train_rl.py --model models/cnn_agent.pt --episodes 100 --save-frequency 50
-```
-
-### Long RL training with CUDA
-```bash
-python train_rl.py --model checkpoints/best_performance.pt --episodes 2000 --device cuda
-```
-
-### Resume RL training
-```bash
-python train_rl.py --checkpoint checkpoints_rl/checkpoint_rl_ep0500.pt --episodes 1000
-```
-
-### Adjust exploration (lower entropy = less random)
-```bash
-python train_rl.py --model models/cnn_agent.pt --episodes 500 --entropy-coef 0.005
-```
-
-## RL Checkpoints
-
-Checkpoints are saved to `checkpoints_rl/` directory:
-
-- `best_rl.pt`: Best evaluation reward model
-- `checkpoint_rl_epXXXX.pt`: Periodic episode checkpoints
-- `final_rl.pt`: Final training checkpoint
-
-Each checkpoint contains:
-- Model weights
-- Optimizer state
-- Episode number
-- Best reward achieved
-- Timestamp
-
-## Output
-
-The final RL-trained model is saved to `models/cnn_agent_rl.pt`.
+- `checkpoints_rl/best.pt`: Best evaluation reward during RL
+- `checkpoints_rl/episode_XXXX.pt`: Periodic RL checkpoints
+- `models/q_value_agent_rl.pt`: Final RL fine-tuned weights
 
 ## Why RL After Supervised?
 
-**Supervised learning** teaches the agent to imitate the teacher, but it's limited by:
-- Teacher's skill ceiling
-- Distribution shift issues
-
-**RL fine-tuning** can:
-- Discover strategies the teacher doesn't use
-- Optimize directly for game rewards
-- Potentially surpass teacher performance
-
-However, RL is:
-- More sample-inefficient (needs many episodes)
-- Can be unstable (use pretrained model as starting point)
-- Benefits greatly from good initialization (supervised pretraining)
+- Supervised training teaches relative action preferences but not true long-horizon returns.
+- Q-learning refines those estimates using actual rewards, allowing the agent to surpass the heuristic and learn strategies unavailable in the demonstrations.

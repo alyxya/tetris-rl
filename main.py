@@ -1,16 +1,17 @@
 """
 Main script for running Tetris agents.
 
-Usage:
+Usage examples:
     python main.py --agent heuristic [--episodes 1] [--render]
-    python main.py --agent cnn --model-path models/cnn_agent.pt [--episodes 1] [--render]
-    python main.py --agent value --model-path models/value_agent.pt [--episodes 1] [--render]
-    python main.py --agent hybrid --model-path models/value_agent.pt [--episodes 1] [--render] [--student-probability 0.5]
+    python main.py --agent q --model-path models/q_value_agent.pt [--episodes 1] [--render]
+    python main.py --agent hybrid --model-path models/q_value_agent.pt [--episodes 1]
+
+`--agent` accepts aliases: `q`, `cnn`, or `value` all route to the unified Q-value agent.
 """
 
 import argparse
 from pufferlib.ocean.tetris import tetris
-from agents import HeuristicAgent, CNNAgent, HybridAgent, ValueAgent
+from agents import HeuristicAgent, QValueAgent, HybridAgent
 
 
 def run_episode(env, agent, render=False, verbose=True, debug_values=False):
@@ -22,7 +23,7 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
         agent: Agent to use
         render: Whether to render the game
         verbose: Whether to print progress
-        debug_values: Whether to print predicted values (ValueAgent only)
+        debug_values: Whether to print predicted values (Q-value agent only)
 
     Returns:
         steps: Number of steps taken
@@ -36,7 +37,7 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
     steps = 0
 
     while not done:
-        # Get action (with optional debug output for ValueAgent)
+        # Get action (with optional debug output for Q-value agent)
         if debug_values and hasattr(agent, 'get_action_values'):
             values = agent.get_action_values(obs[0])
             action = agent.choose_action(obs[0])
@@ -69,10 +70,10 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Run Tetris agents')
     parser.add_argument('--agent', type=str, default='heuristic',
-                        choices=['heuristic', 'cnn', 'value', 'hybrid'],
-                        help='Agent type to use')
+                        choices=['heuristic', 'q', 'cnn', 'value', 'hybrid'],
+                        help='Agent type to use (cnn/value are aliases for q)')
     parser.add_argument('--model-path', type=str, default=None,
-                        help='Path to CNN model weights (for cnn agent)')
+                        help='Path to Q-value model weights (for q/cnn/value/hybrid agents)')
     parser.add_argument('--episodes', type=int, default=1,
                         help='Number of episodes to run')
     parser.add_argument('--render', action='store_true',
@@ -84,7 +85,7 @@ def main():
     parser.add_argument('--random-probability', type=float, default=0.0,
                         help='For hybrid agent: probability of using random action (default: 0.0)')
     parser.add_argument('--debug-values', action='store_true',
-                        help='Print predicted values for each action (value agent only)')
+                        help='Print predicted Q-values for each action (Q agent only)')
 
     args = parser.parse_args()
 
@@ -96,16 +97,9 @@ def main():
         agent = HeuristicAgent()
         print(f"Running HeuristicAgent for {args.episodes} episode(s)...")
         print("The agent evaluates all rotations and horizontal placements.")
-    elif args.agent == 'cnn':
-        agent = CNNAgent(model_path=args.model_path)
-        print(f"Running CNNAgent for {args.episodes} episode(s)...")
-        if args.model_path:
-            print(f"Loaded model from {args.model_path}")
-        else:
-            print("Using randomly initialized model")
-    elif args.agent == 'value':
-        agent = ValueAgent(model_path=args.model_path)
-        print(f"Running ValueAgent for {args.episodes} episode(s)...")
+    elif args.agent in ('q', 'cnn', 'value'):
+        agent = QValueAgent(model_path=args.model_path)
+        print(f"Running QValueAgent for {args.episodes} episode(s)...")
         if args.model_path:
             print(f"Loaded model from {args.model_path}")
         else:
