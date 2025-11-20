@@ -287,7 +287,7 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, scheduler=None, devi
 
 def train(
     teacher_type='heuristic',
-    gamma=0.95,
+    gamma=0.99,
     initial_student_mix=0.0,
     final_student_mix=0.5,
     initial_random_mix=0.0,
@@ -308,7 +308,7 @@ def train(
 
     Args:
         teacher_type: Type of teacher agent ('heuristic' is default)
-        gamma: Discount factor for computing discounted return-to-go (default: 0.95)
+        gamma: Discount factor for computing discounted return-to-go (default: 0.99)
         initial_student_mix: Initial probability of student acting (default: 0.0)
         final_student_mix: Final probability of student acting (default: 0.5)
         initial_random_mix: Initial probability of random acting (default: 0.0)
@@ -512,8 +512,8 @@ def main():
     # Model and training
     parser.add_argument('--teacher', type=str, default='heuristic',
                         help='Teacher agent type (default: heuristic)')
-    parser.add_argument('--gamma', type=float, default=0.95,
-                        help='Discount factor for return-to-go (default: 0.95)')
+    parser.add_argument('--gamma', type=float, default=0.99,
+                        help='Discount factor for return-to-go (default: 0.99)')
     parser.add_argument('--initial-student-mix', type=float, default=0.0,
                         help='Initial probability of student acting (default: 0.0)')
     parser.add_argument('--final-student-mix', type=float, default=0.0,
