@@ -143,11 +143,12 @@ def collect_data(
 
             # Compute height-based penalty for movement actions
             # Height = row index of topmost active cell (0 = top row)
+            # Add 1 so even top row (row 0) has a small penalty
             step_penalty = 0.0
             if action_to_take in penalty_actions and np.any(active):
                 active_rows = np.where(active)[0]
                 height_from_top = np.min(active_rows)  # Smaller row = higher up
-                step_penalty = height_penalty_weight * height_from_top
+                step_penalty = height_penalty_weight * (height_from_top + 1)
 
             # Net reward for this step
             net_reward = step_reward - step_penalty
@@ -224,7 +225,7 @@ def evaluate_agent(agent, n_episodes=10, height_penalty_weight=0.001):
             if action in penalty_actions and np.any(active):
                 active_rows = np.where(active)[0]
                 height_from_top = np.min(active_rows)
-                step_penalty = height_penalty_weight * height_from_top
+                step_penalty = height_penalty_weight * (height_from_top + 1)
 
             lines_cleared = count_lines_cleared(prev_board, next_board)
 
