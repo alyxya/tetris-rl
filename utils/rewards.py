@@ -41,7 +41,7 @@ def compute_discounted_returns(rewards: Iterable[float], gamma: float = 0.99) ->
 class LineClearPenaltyTracker:
     """Track translation/rotation actions to apply proximity penalties on clears."""
 
-    def __init__(self, actions=None, penalty=0.01, decay=0.9):
+    def __init__(self, actions=None, penalty=0.08, decay=0.9):
         self.actions = set(actions if actions is not None else (1, 2, 3))
         self.penalty = float(penalty)
         self.decay = float(decay)
