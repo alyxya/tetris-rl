@@ -47,16 +47,22 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
         else:
             action = agent.choose_action(obs[0])
 
-        obs, reward, terminated, truncated, info = env.step([action])
+        prev_board = obs[0, :200].reshape(20, 10).copy()
+        prev_tick = obs[0, 200]
+        next_obs, reward, terminated, truncated, info = env.step([action])
 
         if render:
             env.render()
 
         # Extract line clear rewards only (for consistent Q-value targets)
-        step_reward = extract_line_clear_reward(reward[0])
+        next_board = next_obs[0, :200].reshape(20, 10)
+        next_tick = next_obs[0, 200]
+        valid = next_tick >= prev_tick
+        step_reward = extract_line_clear_reward(prev_board, next_board, valid)
         total_reward += step_reward
         steps += 1
         done = terminated[0] or truncated[0]
+        obs = next_obs
 
         if verbose and steps % 100 == 0:
             print(f"  Step {steps}, Total reward: {total_reward:.2f}")

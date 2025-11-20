@@ -22,7 +22,7 @@ from datetime import datetime
 from pufferlib.ocean.tetris import tetris
 from agents.heuristic_agent import HeuristicAgent
 from agents.q_agent import QValueAgent, TetrisQNetwork
-from utils.rewards import extract_line_clear_reward, compute_discounted_returns
+from utils.rewards import extract_line_clear_reward, compute_discounted_returns, count_lines_cleared
 
 
 class TetrisDataset(Dataset):
@@ -104,6 +104,8 @@ def collect_data(
             board_empty = locked.copy()
             board_filled = locked.copy()
             board_filled[active] = 1.0
+            prev_board = full_board.copy()
+            prev_tick = obs[0, 200]
 
             # Get teacher action (always - this is the label)
             teacher_action = teacher_agent.choose_action(obs[0])
@@ -119,14 +121,19 @@ def collect_data(
                 action_to_take = teacher_action
 
             # Step environment
-            obs, reward, terminated, truncated, info = env.step([action_to_take])
+            next_obs, reward, terminated, truncated, info = env.step([action_to_take])
             done = terminated[0] or truncated[0]
 
             # Extract line clear rewards only
-            step_reward = extract_line_clear_reward(reward[0])
+            next_board = next_obs[0, :200].reshape(20, 10)
+            next_tick = next_obs[0, 200]
+            valid = next_tick >= prev_tick
+            step_reward = extract_line_clear_reward(prev_board, next_board, valid)
             episode_reward += step_reward
             episode_step_rewards.append(step_reward)
             episode_actions.append(action_to_take)
+
+            obs = next_obs
 
         episode_rewards.append(episode_reward)
         discounted_returns = compute_discounted_returns(episode_step_rewards, gamma=discount)
@@ -156,23 +163,19 @@ def evaluate_agent(agent, n_episodes=10):
         episode_lines = 0
 
         while not done:
+            prev_board = obs[0, :200].reshape(20, 10).copy()
+            prev_tick = obs[0, 200]
             action = agent.choose_action(obs[0], deterministic=True)
-            obs, reward, terminated, truncated, info = env.step([action])
+            next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
 
-            # Extract line clear rewards only
-            step_reward = extract_line_clear_reward(reward[0])
+            next_board = next_obs[0, :200].reshape(20, 10)
+            next_tick = next_obs[0, 200]
+            valid = next_tick >= prev_tick
+            step_reward = extract_line_clear_reward(prev_board, next_board, valid)
             episode_reward += step_reward
-
-            # Track lines cleared by inferring from reward
-            if step_reward >= 0.99:
-                episode_lines += 4
-            elif step_reward >= 0.49:
-                episode_lines += 3
-            elif step_reward >= 0.29:
-                episode_lines += 2
-            elif step_reward >= 0.09:
-                episode_lines += 1
+            episode_lines += count_lines_cleared(prev_board, next_board, valid)
+            obs = next_obs
 
         total_rewards.append(episode_reward)
         total_lines.append(episode_lines)

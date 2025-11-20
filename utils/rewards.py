@@ -1,16 +1,38 @@
-"""
-Reward processing helpers shared across training scripts.
-"""
+"""Reward processing helpers shared across training scripts."""
 
 from typing import Iterable, List
 
+import numpy as np
 
-def extract_line_clear_reward(raw_reward: float) -> float:
-    """Convert raw PufferLib reward into line-clear shaped reward."""
-    step_reward = round(float(raw_reward), 2)
-    if step_reward >= 0.09:
-        return round(step_reward / 0.1) * 0.1
-    return 0.0
+
+N_ROWS = 20
+N_COLS = 10
+LINES_TO_REWARD = {0: 0.0, 1: 0.1, 2: 0.3, 3: 0.6, 4: 1.0}
+
+
+def extract_line_clear_reward(prev_board, next_board, valid=True) -> float:
+    """Return synthetic line-clear reward using board occupancy."""
+    if not valid:
+        return 0.0
+
+    lines = count_lines_cleared(prev_board, next_board)
+    return LINES_TO_REWARD.get(lines, 0.0)
+
+
+def count_lines_cleared(prev_board, next_board, valid=True) -> int:
+    """Infer cleared lines from change in locked block counts."""
+    if not valid:
+        return 0
+
+    prev_locked = _count_locked(prev_board)
+    next_locked = _count_locked(next_board)
+
+    delta = prev_locked + 4 - next_locked
+    if delta < 0:
+        return 0
+
+    lines = max(0, min(4, delta // N_COLS))
+    return lines
 
 
 def compute_discounted_returns(rewards: Iterable[float], gamma: float = 0.99) -> List[float]:
@@ -21,3 +43,10 @@ def compute_discounted_returns(rewards: Iterable[float], gamma: float = 0.99) ->
         future = rewards[idx] + gamma * future
         returns[idx] = future
     return returns
+
+
+def _count_locked(board) -> int:
+    arr = np.asarray(board)
+    if arr.shape != (N_ROWS, N_COLS):
+        arr = arr.reshape(N_ROWS, N_COLS)
+    return int(np.count_nonzero(arr == 1))
