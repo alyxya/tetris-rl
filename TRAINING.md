@@ -2,7 +2,7 @@
 
 ## Overview
 
-`train.py` performs supervised pretraining for the unified Q-value agent. A heuristic teacher (with optional random perturbations) plays Tetris and labels every state with the desired action. This produces a diverse imitation dataset that already ranks actions reasonably well and serves as a strong initialization for RL fine-tuning.
+`train.py` performs supervised pretraining for the unified Q-value agent. A heuristic teacher (with optional random perturbations) plays Tetris and labels every state with the desired action. We pair each labelled state with a discounted line-clear return target so the network directly regresses future Q-values, providing a strong initialization for RL fine-tuning.
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ python train.py --checkpoint checkpoints/checkpoint_iter005.pt
 ## Training Process
 
 1. **Data collection** – Student agent acts in the environment. Each step is labeled by the teacher and optionally perturbed by random actions.
-2. **Supervised update** – The Q-network trains with cross-entropy on aggregated `(state, action)` pairs, treating the Q-values as logits.
+2. **Supervised update** – The Q-network regresses discounted (γ≈0.99) line-clear returns for each teacher-labelled action using MSE loss.
 3. **Evaluation & checkpointing** – After each iteration we evaluate the greedy policy, log metrics, and save checkpoints.
 
 The teacher controls every step unless the script injects a random move (probability `--random-action-prob`) to keep the dataset diverse.
@@ -40,6 +40,7 @@ The teacher controls every step unless the script injects a random move (probabi
 - `--batch-size`: Batch size (default `128`)
 - `--lr`: Learning rate (default `1e-3`)
 - `--val-split`: Validation ratio (default `0.2`)
+- `--discount`: Discount factor for the line-clear return targets (default `0.99`)
 
 ### Data Diversity
 - `--random-action-prob`: Probability of forcing a random action (default `0.1`)
@@ -50,7 +51,7 @@ The teacher controls every step unless the script injects a random move (probabi
 
 ## Outputs
 
-- `checkpoints/best_val.pt`: Best validation accuracy
+- `checkpoints/best_val.pt`: Best validation loss
 - `checkpoints/best_performance.pt`: Best evaluation reward
 - `checkpoints/checkpoint_iterXXX.pt`: Iteration snapshots
 - `models/q_value_agent.pt`: Final supervised weights
@@ -73,7 +74,7 @@ agent.model.load_state_dict(checkpoint['model_state_dict'])
 
 # Reinforcement Learning Fine-tuning
 
-`train_rl.py` continues training with Q-learning (TD updates, replay buffer, and target network). It learns directly from the default environment reward and refines the Q-values learned during supervision.
+`train_rl.py` continues training with Q-learning (TD updates, replay buffer, and target network). It uses the same line-clear shaped rewards as supervised training, refining the discounted Q-values learned from the teacher demos.
 
 ## Quick Start
 

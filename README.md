@@ -14,8 +14,8 @@ A rule-based agent that uses heuristics to play Tetris:
 ### 2. Q-Value Agent
 A unified neural agent that predicts action values:
 - Dual-input CNN architecture (piece as empty + piece as filled)
-- Outputs 7 Q-values that can be treated as logits during imitation
-- Trained via supervised teacher forcing, then fine-tuned with TD learning
+- Outputs 7 discounted line-clear Q-values (one per discrete action)
+- Trained via supervised regression on teacher-labelled returns, then fine-tuned with TD learning
 
 ### 3. Hybrid Agent
 A hybrid agent that mixes Q-value and heuristic policies:
@@ -46,7 +46,7 @@ python train.py --checkpoint checkpoints/checkpoint_iter005.pt
 The training addresses **distribution shift** by generating fresh experience every iteration:
 
 1. **Data Collection**: Teacher agent (with occasional random actions) plays episodes and labels every state
-2. **Training**: Q-value network trains on aggregate dataset for several epochs
+2. **Training**: Q-value network regresses teacher-labelled discounted (γ≈0.99) line-clear returns on the aggregate dataset
 3. **Evaluation**: Agent performance measured in actual gameplay
 4. **Checkpointing**: Regular checkpoints saved for resuming training
 
@@ -61,13 +61,14 @@ During collection, the teacher drives almost every move while a configurable fra
 - `--epochs`: Training epochs per iteration (default: `10`)
 - `--device`: `cpu`, `cuda`, or `mps` (default: `cpu`)
 - `--random-action-prob`: Probability of forcing random actions during data collection (default: `0.1`)
+- `--discount`: Discount factor for the supervised Q-value targets (default: `0.99`)
 - `--save-frequency`: Save checkpoint every N iterations (default: `1`)
 
 See [TRAINING.md](TRAINING.md) for full documentation.
 
 ### Outputs
 
-- `checkpoints/best_val.pt`: Best validation accuracy model
+- `checkpoints/best_val.pt`: Best validation loss model
 - `checkpoints/best_performance.pt`: Best evaluation reward model
 - `checkpoints/checkpoint_iterXXX.pt`: Periodic iteration checkpoints
 - `models/q_value_agent.pt`: Final supervised model (weights only)
@@ -128,7 +129,7 @@ MLP Head:
 ├── Linear(256, 128) + ReLU + Dropout(0.3)
 └── Linear(128, 7) -> Action values
 
-Output: 7 Q-values (treated as logits during imitation learning)
+Output: 7 discounted line-clear Q-values
 ```
 
 Total parameters: ~6.7M
@@ -139,6 +140,7 @@ Total parameters: ~6.7M
 - Learning rate: 1e-3
 - Batch size: 128
 - Optimizer: Adam
+- Loss: MSE between predicted and target Q-values
 - Scheduler: ReduceLROnPlateau (factor=0.5, patience=3)
 - Dropout: 0.3
 

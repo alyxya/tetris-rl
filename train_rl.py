@@ -3,7 +3,7 @@ Q-learning fine-tuning for the unified Tetris Q-value agent.
 
 Workflow:
 1. Start from a supervised-pretrained model (optional but recommended)
-2. Continue training with TD learning using default PufferLib rewards
+2. Continue training with TD learning using the same line-clear shaped rewards
 """
 
 import argparse
@@ -18,6 +18,7 @@ import torch.nn.functional as F
 
 from pufferlib.ocean.tetris import tetris
 from agents.q_agent import TetrisQNetwork
+from utils.rewards import extract_line_clear_reward
 
 
 def extract_boards(obs_flat, n_rows=20, n_cols=10):
@@ -150,7 +151,7 @@ def evaluate_model(model, device, n_episodes=10):
 
             obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
-            total_reward += float(reward[0])
+            total_reward += extract_line_clear_reward(reward[0])
 
         rewards.append(total_reward)
 
@@ -249,7 +250,7 @@ def train_rl(
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
             next_empty, next_filled = extract_boards(next_obs[0])
-            reward_value = float(reward[0])
+            reward_value = extract_line_clear_reward(reward[0])
 
             trainer.store((board_empty, board_filled, action, reward_value, next_empty, next_filled, float(done)))
             loss = trainer.optimize(batch_size)

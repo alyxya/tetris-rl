@@ -3,6 +3,9 @@ Supervised pretraining for the unified Q-value agent using teacher supervision.
 
 The teacher drives gameplay (with optional random perturbations) and labels each
 state, producing a large imitation dataset across diverse board configurations.
+Targets are discounted (gamma≈0.99) line-clear returns so that the network
+directly regresses future discounted reward instead of a categorical action
+distribution.
 """
 
 import torch
@@ -19,24 +22,27 @@ from datetime import datetime
 from pufferlib.ocean.tetris import tetris
 from agents.heuristic_agent import HeuristicAgent
 from agents.q_agent import QValueAgent, TetrisQNetwork
+from utils.rewards import extract_line_clear_reward, compute_discounted_returns
 
 
 class TetrisDataset(Dataset):
-    """Dataset of (state, action) pairs."""
+    """Dataset of (state, action, q-value) tuples."""
 
-    def __init__(self, states_empty, states_filled, actions):
+    def __init__(self, states_empty, states_filled, actions, q_values):
         self.states_empty = states_empty
         self.states_filled = states_filled
         self.actions = actions
+        self.q_values = q_values
 
     def __len__(self):
-        return len(self.actions)
+        return len(self.q_values)
 
     def __getitem__(self, idx):
         return (
             torch.FloatTensor(self.states_empty[idx]),
             torch.FloatTensor(self.states_filled[idx]),
-            torch.LongTensor([self.actions[idx]])
+            torch.LongTensor([self.actions[idx]]),
+            torch.FloatTensor([self.q_values[idx]])
         )
 
 
@@ -44,6 +50,7 @@ def collect_data(
     teacher_agent,
     n_episodes=10,
     random_prob=0.1,
+    discount=0.99,
     verbose=True,
 ):
     """
@@ -53,19 +60,22 @@ def collect_data(
         teacher_agent: Teacher agent (e.g., HeuristicAgent) that provides labels
         n_episodes: Number of episodes to collect
         random_prob: Probability of forcing a random action for extra coverage
+        discount: Discount factor used for line-clear return targets
         verbose: Print progress
 
     Returns:
         states_empty: list of boards with piece as empty
         states_filled: list of boards with piece as filled
         actions: list of teacher action labels
-        episode_rewards: list of episode rewards
+        q_values: list of discounted line-clear returns
+        episode_rewards: list of per-episode line clear rewards
     """
     env = tetris.Tetris(seed=int(time.time() * 1e6))
 
     states_empty = []
     states_filled = []
     actions = []
+    q_targets = []
     episode_rewards = []
 
     if verbose:
@@ -80,6 +90,10 @@ def collect_data(
         teacher_agent.reset()
         done = False
         episode_reward = 0
+        episode_states_empty = []
+        episode_states_filled = []
+        episode_actions = []
+        episode_step_rewards = []
 
         while not done:
             # Parse observation
@@ -95,9 +109,9 @@ def collect_data(
             teacher_action = teacher_agent.choose_action(obs[0])
 
             # Store state with teacher label
-            states_empty.append(board_empty)
-            states_filled.append(board_filled)
-            actions.append(teacher_action)
+            episode_states_empty.append(board_empty)
+            episode_states_filled.append(board_filled)
+            episode_actions.append(teacher_action)
 
             # Decide which action to take in environment
             if np.random.random() < random_prob:
@@ -110,21 +124,23 @@ def collect_data(
             done = terminated[0] or truncated[0]
 
             # Extract line clear rewards only
-            step_reward = round(reward[0], 2)
-            if step_reward >= 0.09:
-                step_reward = round(step_reward / 0.1) * 0.1
-            else:
-                step_reward = 0.0
+            step_reward = extract_line_clear_reward(reward[0])
             episode_reward += step_reward
+            episode_step_rewards.append(step_reward)
 
         episode_rewards.append(episode_reward)
+        discounted_returns = compute_discounted_returns(episode_step_rewards, gamma=discount)
+        states_empty.extend(episode_states_empty)
+        states_filled.extend(episode_states_filled)
+        actions.extend(episode_actions)
+        q_targets.extend(discounted_returns)
 
     env.close()
 
     if verbose:
         print(f"Collected {len(actions)} samples, avg reward: {np.mean(episode_rewards):.2f}")
 
-    return states_empty, states_filled, actions, episode_rewards
+    return states_empty, states_filled, actions, q_targets, episode_rewards
 
 
 def evaluate_agent(agent, n_episodes=10):
@@ -145,11 +161,7 @@ def evaluate_agent(agent, n_episodes=10):
             done = terminated[0] or truncated[0]
 
             # Extract line clear rewards only
-            step_reward = round(reward[0], 2)
-            if step_reward >= 0.09:
-                step_reward = round(step_reward / 0.1) * 0.1
-            else:
-                step_reward = 0.0
+            step_reward = extract_line_clear_reward(reward[0])
             episode_reward += step_reward
 
             # Track lines cleared by inferring from reward
@@ -175,25 +187,27 @@ def evaluate_agent(agent, n_episodes=10):
 
 
 def train_epoch(model, train_loader, optimizer, criterion, device):
-    """Train for one epoch."""
+    """Train for one epoch of Q-value regression with teacher actions."""
     model.train()
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
 
-    for board_empty, board_filled, actions in train_loader:
+    for board_empty, board_filled, actions, q_targets in train_loader:
         board_empty = board_empty.unsqueeze(1).to(device)
         board_filled = board_filled.unsqueeze(1).to(device)
         actions = actions.squeeze(1).to(device)
+        q_targets = q_targets.squeeze(1).to(device)
 
         optimizer.zero_grad()
-        logits = model(board_empty, board_filled)
-        loss = criterion(logits, actions)
+        q_values = model(board_empty, board_filled)
+        selected_q = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+        loss = criterion(selected_q, q_targets)
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item() * actions.size(0)
-        _, predicted = logits.max(1)
+        _, predicted = q_values.max(1)
         total_correct += predicted.eq(actions).sum().item()
         total_samples += actions.size(0)
 
@@ -201,23 +215,25 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
 
 
 def validate(model, val_loader, criterion, device):
-    """Validate model."""
+    """Validate Q-value regression performance."""
     model.eval()
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
 
     with torch.no_grad():
-        for board_empty, board_filled, actions in val_loader:
+        for board_empty, board_filled, actions, q_targets in val_loader:
             board_empty = board_empty.unsqueeze(1).to(device)
             board_filled = board_filled.unsqueeze(1).to(device)
             actions = actions.squeeze(1).to(device)
+            q_targets = q_targets.squeeze(1).to(device)
 
-            logits = model(board_empty, board_filled)
-            loss = criterion(logits, actions)
+            q_values = model(board_empty, board_filled)
+            selected_q = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+            loss = criterion(selected_q, q_targets)
 
             total_loss += loss.item() * actions.size(0)
-            _, predicted = logits.max(1)
+            _, predicted = q_values.max(1)
             total_correct += predicted.eq(actions).sum().item()
             total_samples += actions.size(0)
 
@@ -267,6 +283,7 @@ def train(
     device='cpu',
     val_split=0.2,
     random_action_prob=0.1,
+    discount=0.99,
     checkpoint_dir='checkpoints',
     save_frequency=1
 ):
@@ -284,6 +301,7 @@ def train(
         device: 'cpu' or 'cuda'
         val_split: Validation split ratio
         random_action_prob: Probability of forcing a random environment action
+        discount: Discount factor for line-clear return targets
         checkpoint_dir: Directory to save checkpoints
         save_frequency: Save checkpoint every N iterations
     """
@@ -297,9 +315,9 @@ def train(
     model = TetrisQNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=3
+        optimizer, mode='min', factor=0.5, patience=3
     )
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.MSELoss()
 
     # Initialize agents
     eval_agent = QValueAgent(device=str(device))
@@ -314,11 +332,12 @@ def train(
     all_states_empty = []
     all_states_filled = []
     all_actions = []
+    all_q_values = []
 
     # Training state
     start_iteration = 0
     best_metrics = {
-        'val_acc': 0.0,
+        'val_loss': float('inf'),
         'eval_reward': -float('inf')
     }
 
@@ -328,6 +347,8 @@ def train(
         ckpt = load_checkpoint(checkpoint, model, optimizer, scheduler, device)
         start_iteration = ckpt['iteration'] + 1
         best_metrics = ckpt.get('best_metrics', best_metrics)
+        if 'val_loss' not in best_metrics:
+            best_metrics['val_loss'] = float('inf')
         print(f"Resuming from iteration {start_iteration}")
         print(f"Best metrics so far: {best_metrics}")
 
@@ -343,6 +364,7 @@ def train(
     print(f"Batch size: {batch_size}")
     print(f"Learning rate: {lr}")
     print(f"Random action prob: {random_action_prob:.2f}")
+    print(f"Discount factor: {discount:.2f}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"{'='*70}\n")
 
@@ -353,10 +375,11 @@ def train(
         print(f"{'='*70}")
 
         # Collect data using teacher policy + random noise
-        states_empty, states_filled, actions, episode_rewards = collect_data(
+        states_empty, states_filled, actions, q_values, _ = collect_data(
             teacher_agent,
             n_episodes=episodes_per_iter,
             random_prob=random_action_prob,
+            discount=discount,
             verbose=True
         )
 
@@ -364,6 +387,7 @@ def train(
         all_states_empty.extend(states_empty)
         all_states_filled.extend(states_filled)
         all_actions.extend(actions)
+        all_q_values.extend(q_values)
 
         print(f"Total dataset size: {len(all_actions):,} samples")
 
@@ -378,13 +402,15 @@ def train(
         train_dataset = TetrisDataset(
             [all_states_empty[i] for i in train_idx],
             [all_states_filled[i] for i in train_idx],
-            [all_actions[i] for i in train_idx]
+            [all_actions[i] for i in train_idx],
+            [all_q_values[i] for i in train_idx]
         )
 
         val_dataset = TetrisDataset(
             [all_states_empty[i] for i in val_idx],
             [all_states_filled[i] for i in val_idx],
-            [all_actions[i] for i in val_idx]
+            [all_actions[i] for i in val_idx],
+            [all_q_values[i] for i in val_idx]
         )
 
         train_loader = DataLoader(
@@ -405,16 +431,16 @@ def train(
                   f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
 
             # Save best validation model
-            if val_acc > best_metrics['val_acc']:
-                best_metrics['val_acc'] = val_acc
+            if val_loss < best_metrics['val_loss']:
+                best_metrics['val_loss'] = val_loss
                 save_checkpoint(
                     model, optimizer, scheduler, iteration, epoch,
                     best_metrics, len(all_actions), checkpoint_dir, 'best_val.pt'
                 )
-                print(f"    -> Saved best validation model (val_acc: {val_acc:.2f}%)")
+                print(f"    -> Saved best validation model (val_loss: {val_loss:.4f})")
 
-        # Step scheduler based on validation accuracy
-        scheduler.step(val_acc)
+        # Step scheduler based on validation loss
+        scheduler.step(val_loss)
 
         # Evaluate agent performance
         print("\nEvaluating agent performance...")
@@ -453,7 +479,8 @@ def train(
     print(f"\n{'='*70}")
     print("Training Complete!")
     print(f"{'='*70}")
-    print(f"Best validation accuracy: {best_metrics['val_acc']:.2f}%")
+    best_val_loss = best_metrics.get('val_loss', float('inf'))
+    print(f"Best validation loss: {best_val_loss:.4f}")
     print(f"Best evaluation reward: {best_metrics['eval_reward']:.2f}")
     print(f"Total dataset size: {len(all_actions):,} samples")
     print(f"Checkpoints saved to: {checkpoint_dir}/")
@@ -489,6 +516,8 @@ def main():
                         help='Learning rate')
     parser.add_argument('--val-split', type=float, default=0.2,
                         help='Validation split ratio')
+    parser.add_argument('--discount', type=float, default=0.99,
+                        help='Discount factor for line-clear returns')
 
     # Data diversity
     parser.add_argument('--random-action-prob', type=float, default=0.1,
@@ -513,6 +542,7 @@ def main():
         device=args.device,
         val_split=args.val_split,
         random_action_prob=args.random_action_prob,
+        discount=args.discount,
         checkpoint_dir=args.checkpoint_dir,
         save_frequency=args.save_frequency
     )

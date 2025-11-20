@@ -4,11 +4,11 @@ Unified Q-value CNN agent for Tetris.
 This model merges the original policy CNN and value CNN approaches:
 - Dual-board CNN backbone identical to the old policy network
 - Padding scheme matches the value network (explicit wall padding)
-- Output: 7 Q-values (one per discrete Tetris action)
+- Output: 7 discounted line-clear Q-values (one per discrete action)
 
 The same network can be used for:
-1. Supervised imitation learning (treat outputs as logits for teacher labels)
-2. Reinforcement learning fine-tuning (interpret outputs as Q-values)
+1. Supervised imitation learning (regress teacher-labelled discounted returns)
+2. Reinforcement learning fine-tuning (standard TD/Q-learning objectives)
 """
 
 import torch
