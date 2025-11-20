@@ -493,7 +493,7 @@ def main():
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='Path to checkpoint to resume from')
     parser.add_argument('--device', type=str, default='cpu',
-                        choices=['cpu', 'cuda'],
+                        choices=['cpu', 'cuda', 'mps'],
                         help='Device to use for training')
 
     # Training schedule

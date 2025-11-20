@@ -287,7 +287,7 @@ def main():
                         help='Resume RL training from checkpoint')
     parser.add_argument('--episodes', type=int, default=500,
                         help='Number of RL episodes to run')
-    parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda'],
+    parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda', 'mps'],
                         help='Torch device to use')
     parser.add_argument('--batch-size', type=int, default=128,
                         help='Batch size for TD updates')
