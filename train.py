@@ -184,6 +184,26 @@ def collect_data(
         # Combined Q-value = reward_returns - penalty_returns
         combined_q_values = [r - p for r, p in zip(reward_returns, penalty_returns)]
 
+        # Print detailed Q-value info for first episode
+        if episode == 0 and verbose:
+            print(f"\n{'='*80}")
+            print(f"Q-value Computation Details (Episode 1, first 30 steps)")
+            print(f"{'='*80}")
+            print(f"Piece boundaries: {episode_piece_boundaries}")
+            print(f"Total steps: {len(combined_q_values)}, Total pieces: {len(piece_boundaries)-1}")
+            print()
+            print(f"{'Step':>4} | {'Action':>6} | {'Reward':>6} | {'Penalty':>7} | {'R-Ret':>7} | {'P-Ret':>7} | {'Q-Val':>7} | {'Note'}")
+            print("-" * 90)
+            action_names = ["noop", "left", "right", "rotate", "soft", "hard", "hold"]
+            for i in range(min(30, len(combined_q_values))):
+                note = ""
+                if i in episode_piece_boundaries:
+                    note = "← NEW PIECE"
+                action_name = action_names[episode_actions[i]]
+                print(f"{i:4d} | {action_name:>6} | {episode_step_rewards[i]:6.2f} | {episode_step_penalties[i]:7.3f} | "
+                      f"{reward_returns[i]:7.3f} | {penalty_returns[i]:7.4f} | {combined_q_values[i]:7.3f} | {note}")
+            print()
+
         states_empty.extend(episode_states_empty)
         states_filled.extend(episode_states_filled)
         actions.extend(episode_actions)
