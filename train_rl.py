@@ -157,15 +157,19 @@ def evaluate_model(model, device, n_episodes=10):
 
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
-            next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-            next_tick = next_obs[0, board_size]
-            if next_tick < prev_tick:
-                penalty_tracker.reset()
-                step_reward = 0.0
-            else:
-                base_reward = extract_line_clear_reward(prev_board, next_board)
-                step_reward = penalty_tracker.step(action, base_reward)
-            total_reward += step_reward
+
+            # Skip reward calculation on terminal states to avoid false line clear detection
+            if not done:
+                next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
+                next_tick = next_obs[0, board_size]
+                if next_tick < prev_tick:
+                    penalty_tracker.reset()
+                    step_reward = 0.0
+                else:
+                    base_reward = extract_line_clear_reward(prev_board, next_board)
+                    step_reward = penalty_tracker.step(action, base_reward)
+                total_reward += step_reward
+
             obs = next_obs
 
         rewards.append(total_reward)
@@ -271,14 +275,19 @@ def train_rl(
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
             next_empty, next_filled = extract_boards(next_obs[0], n_rows, n_cols)
-            next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-            next_tick = next_obs[0, board_size]
-            if next_tick < prev_tick:
-                penalty_tracker.reset()
-                reward_value = 0.0
+
+            # Skip reward calculation on terminal states to avoid false line clear detection
+            if not done:
+                next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
+                next_tick = next_obs[0, board_size]
+                if next_tick < prev_tick:
+                    penalty_tracker.reset()
+                    reward_value = 0.0
+                else:
+                    base_reward = extract_line_clear_reward(prev_board, next_board)
+                    reward_value = penalty_tracker.step(action, base_reward)
             else:
-                base_reward = extract_line_clear_reward(prev_board, next_board)
-                reward_value = penalty_tracker.step(action, base_reward)
+                reward_value = 0.0
 
             trainer.store((board_empty, board_filled, action, reward_value, next_empty, next_filled, float(done)))
             loss = trainer.optimize(batch_size)

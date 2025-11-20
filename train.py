@@ -137,24 +137,26 @@ def collect_data(
             next_obs, reward, terminated, truncated, info = env.step([action_to_take])
             done = terminated[0] or truncated[0]
 
-            # Extract line clear rewards
-            next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-            step_reward = extract_line_clear_reward(prev_board, next_board)
+            # Skip reward calculation on terminal states to avoid false line clear detection
+            if not done:
+                # Extract line clear rewards
+                next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
+                step_reward = extract_line_clear_reward(prev_board, next_board)
 
-            # Compute height-based penalty for movement actions
-            # Height = row index of topmost active cell (0 = top row)
-            # Add 1 so even top row (row 0) has a small penalty
-            step_penalty = 0.0
-            if action_to_take in penalty_actions and np.any(active):
-                active_rows = np.where(active)[0]
-                height_from_top = np.min(active_rows)  # Smaller row = higher up
-                step_penalty = height_penalty_weight * (height_from_top + 1)
+                # Compute height-based penalty for movement actions
+                # Height = row index of topmost active cell (0 = top row)
+                # Add 1 so even top row (row 0) has a small penalty
+                step_penalty = 0.0
+                if action_to_take in penalty_actions and np.any(active):
+                    active_rows = np.where(active)[0]
+                    height_from_top = np.min(active_rows)  # Smaller row = higher up
+                    step_penalty = height_penalty_weight * (height_from_top + 1)
 
-            # Net reward for this step
-            net_reward = step_reward - step_penalty
-            episode_reward += net_reward
-            episode_net_rewards.append(net_reward)
-            episode_actions.append(action_to_take)
+                # Net reward for this step
+                net_reward = step_reward - step_penalty
+                episode_reward += net_reward
+                episode_net_rewards.append(net_reward)
+                episode_actions.append(action_to_take)
 
             obs = next_obs
 
@@ -217,20 +219,23 @@ def evaluate_agent(agent, n_episodes=10, height_penalty_weight=0.0002):
             next_obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
 
-            next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-            step_reward = extract_line_clear_reward(prev_board, next_board)
+            # Skip reward calculation on terminal states to avoid false line clear detection
+            if not done:
+                next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
+                step_reward = extract_line_clear_reward(prev_board, next_board)
 
-            # Height-based penalty
-            step_penalty = 0.0
-            if action in penalty_actions and np.any(active):
-                active_rows = np.where(active)[0]
-                height_from_top = np.min(active_rows)
-                step_penalty = height_penalty_weight * (height_from_top + 1)
+                # Height-based penalty
+                step_penalty = 0.0
+                if action in penalty_actions and np.any(active):
+                    active_rows = np.where(active)[0]
+                    height_from_top = np.min(active_rows)
+                    step_penalty = height_penalty_weight * (height_from_top + 1)
 
-            lines_cleared = count_lines_cleared(prev_board, next_board)
+                lines_cleared = count_lines_cleared(prev_board, next_board)
 
-            episode_reward += step_reward - step_penalty
-            episode_lines += lines_cleared
+                episode_reward += step_reward - step_penalty
+                episode_lines += lines_cleared
+
             obs = next_obs
 
         total_rewards.append(episode_reward)

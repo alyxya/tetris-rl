@@ -13,7 +13,7 @@ import argparse
 import time
 from pufferlib.ocean.tetris import tetris
 from agents import HeuristicAgent, QValueAgent, HybridAgent
-from utils.rewards import extract_line_clear_reward, LineClearPenaltyTracker
+from utils.rewards import extract_line_clear_reward
 
 
 def run_episode(env, agent, render=False, verbose=True, debug_values=False):
@@ -36,7 +36,6 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
     n_cols = env.n_cols
     board_size = n_rows * n_cols
     agent.reset()
-    penalty_tracker = LineClearPenaltyTracker()
 
     done = False
     total_reward = 0
@@ -52,24 +51,20 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
             action = agent.choose_action(obs[0])
 
         prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
-        prev_tick = obs[0, board_size]
         next_obs, reward, terminated, truncated, info = env.step([action])
+        done = terminated[0] or truncated[0]
 
         if render:
             env.render()
 
-        # Extract line clear rewards only (for consistent Q-value targets)
-        next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
-        next_tick = next_obs[0, board_size]
-        if next_tick < prev_tick:
-            penalty_tracker.reset()
-            step_reward = 0.0
-        else:
-            base_reward = extract_line_clear_reward(prev_board, next_board)
-            step_reward = penalty_tracker.step(action, base_reward)
-        total_reward += step_reward
+        # Extract line clear rewards only (matching train.py evaluation)
+        # Skip reward calculation on terminal states to avoid false line clear detection
+        if not done:
+            next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
+            step_reward = extract_line_clear_reward(prev_board, next_board)
+            total_reward += step_reward
+
         steps += 1
-        done = terminated[0] or truncated[0]
         obs = next_obs
 
         if verbose and steps % 100 == 0:
