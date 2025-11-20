@@ -13,7 +13,7 @@ from pufferlib.ocean.tetris import tetris
 from agents import HeuristicAgent, CNNAgent, HybridAgent, ValueAgent
 
 
-def run_episode(env, agent, render=False, verbose=True):
+def run_episode(env, agent, render=False, verbose=True, debug_values=False):
     """
     Run a single episode with the given agent.
 
@@ -22,6 +22,7 @@ def run_episode(env, agent, render=False, verbose=True):
         agent: Agent to use
         render: Whether to render the game
         verbose: Whether to print progress
+        debug_values: Whether to print predicted values (ValueAgent only)
 
     Returns:
         steps: Number of steps taken
@@ -35,7 +36,14 @@ def run_episode(env, agent, render=False, verbose=True):
     steps = 0
 
     while not done:
-        action = agent.choose_action(obs[0])
+        # Get action (with optional debug output for ValueAgent)
+        if debug_values and hasattr(agent, 'get_action_values'):
+            values = agent.get_action_values(obs[0])
+            action = agent.choose_action(obs[0])
+            print(f"Step {steps}: Values={values.round(3)}, Best action={action} (value={values[action]:.3f})")
+        else:
+            action = agent.choose_action(obs[0])
+
         obs, reward, terminated, truncated, info = env.step([action])
 
         if render:
@@ -67,6 +75,8 @@ def main():
                         help='Print progress during episodes')
     parser.add_argument('--student-probability', type=float, default=0.5,
                         help='For hybrid agent: probability of using student vs teacher (default: 0.5)')
+    parser.add_argument('--debug-values', action='store_true',
+                        help='Print predicted values for each action (value agent only)')
 
     args = parser.parse_args()
 
@@ -111,7 +121,7 @@ def main():
         if args.episodes > 1:
             print(f"\n=== Episode {episode + 1}/{args.episodes} ===")
 
-        steps, reward = run_episode(env, agent, render=args.render, verbose=args.verbose)
+        steps, reward = run_episode(env, agent, render=args.render, verbose=args.verbose, debug_values=args.debug_values)
 
         all_steps.append(steps)
         all_rewards.append(reward)
