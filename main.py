@@ -5,7 +5,7 @@ Usage:
     python main.py --agent heuristic [--episodes 1] [--render]
     python main.py --agent cnn --model-path models/cnn_agent.pt [--episodes 1] [--render]
     python main.py --agent value --model-path models/value_agent.pt [--episodes 1] [--render]
-    python main.py --agent hybrid --model-path models/cnn_agent.pt [--episodes 1] [--render]
+    python main.py --agent hybrid --model-path models/value_agent.pt [--episodes 1] [--render] [--student-probability 0.5]
 """
 
 import argparse

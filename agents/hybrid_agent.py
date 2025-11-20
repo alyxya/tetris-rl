@@ -1,8 +1,8 @@
 """
-Hybrid agent that randomly switches between Student (CNN) and Teacher (Heuristic) modes.
+Hybrid agent that randomly switches between Student (Value) and Teacher (Heuristic) modes.
 
 This agent makes a random choice for each action between:
-- Student: CNN-based policy (learned behavior)
+- Student: Value-based policy (learned behavior)
 - Teacher: Heuristic-based policy (rule-based behavior)
 
 This can be useful for:
@@ -16,12 +16,12 @@ import sys
 import os
 
 from agents.base_agent import BaseTetrisAgent
-from agents.cnn_agent import CNNAgent
+from agents.value_agent import ValueAgent
 from agents.heuristic_agent import HeuristicAgent
 
 
 class HybridAgent(BaseTetrisAgent):
-    """Agent that randomly chooses between Student (CNN) and Teacher (Heuristic) policies."""
+    """Agent that randomly chooses between Student (Value) and Teacher (Heuristic) policies."""
 
     def __init__(self, n_rows=20, n_cols=10, device='cpu', model_path=None, student_probability=0.5):
         """
@@ -37,7 +37,7 @@ class HybridAgent(BaseTetrisAgent):
         super().__init__(n_rows, n_cols)
 
         # Initialize both sub-agents
-        self.student_agent = CNNAgent(n_rows, n_cols, device, model_path)
+        self.student_agent = ValueAgent(n_rows, n_cols, device, model_path)
         self.teacher_agent = HeuristicAgent(n_rows, n_cols)
 
         # Store student probability
@@ -54,13 +54,13 @@ class HybridAgent(BaseTetrisAgent):
         self.student_count = 0
         self.teacher_count = 0
 
-    def choose_action(self, obs, temperature=1.0, deterministic=False):
+    def choose_action(self, obs, epsilon=0.0, deterministic=False):
         """
         Choose action by randomly selecting between student and teacher agents.
 
         Args:
             obs: flattened observation array
-            temperature: sampling temperature (for student agent)
+            epsilon: epsilon-greedy exploration (for student agent)
             deterministic: if True, use deterministic student policy
 
         Returns:
@@ -68,8 +68,8 @@ class HybridAgent(BaseTetrisAgent):
         """
         # Random choice based on student_probability
         if np.random.random() < self.student_probability:
-            # Use student agent (CNN)
-            action = self.student_agent.choose_action(obs, temperature, deterministic)
+            # Use student agent (value-based)
+            action = self.student_agent.choose_action(obs, epsilon, deterministic)
             self.student_count += 1
         else:
             # Use teacher agent (heuristic)
