@@ -105,7 +105,14 @@ def collect_data(student_agent, teacher_agent, n_episodes=10, exploration_prob=0
             # Step environment
             obs, reward, terminated, truncated, info = env.step([action_to_take])
             done = terminated[0] or truncated[0]
-            episode_reward += reward[0]
+
+            # Extract line clear rewards only
+            step_reward = round(reward[0], 2)
+            if step_reward >= 0.09:
+                step_reward = round(step_reward / 0.1) * 0.1
+            else:
+                step_reward = 0.0
+            episode_reward += step_reward
 
         episode_rewards.append(episode_reward)
 
@@ -133,7 +140,14 @@ def evaluate_agent(agent, n_episodes=10):
             action = agent.choose_action(obs[0], deterministic=True)
             obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
-            episode_reward += reward[0]
+
+            # Extract line clear rewards only
+            step_reward = round(reward[0], 2)
+            if step_reward >= 0.09:
+                step_reward = round(step_reward / 0.1) * 0.1
+            else:
+                step_reward = 0.0
+            episode_reward += step_reward
 
             # Track lines cleared (info is a list, one per env)
             if isinstance(info, list) and len(info) > 0:

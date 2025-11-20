@@ -49,7 +49,13 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
         if render:
             env.render()
 
-        total_reward += reward[0]
+        # Extract line clear rewards only
+        step_reward = round(reward[0], 2)
+        if step_reward >= 0.09:
+            step_reward = round(step_reward / 0.1) * 0.1
+        else:
+            step_reward = 0.0
+        total_reward += step_reward
         steps += 1
         done = terminated[0] or truncated[0]
 
