@@ -150,18 +150,20 @@ def collect_data(
             # Compute penalty for movement actions
             step_penalty = penalty_per_move if action_to_take in penalty_actions else 0.0
 
-            # Check if piece locked (locked cell count changed)
-            next_locked_count = np.count_nonzero(next_obs[0, :board_size] == 1)
-            if next_locked_count != prev_locked_count:
-                # Piece locked (count increased) or lines cleared (count decreased)
-                # Either way, marks a new piece starting
-                episode_piece_boundaries.append(len(episode_actions))
-            prev_locked_count = next_locked_count
-
+            # Store step data BEFORE checking piece boundaries
             episode_reward += step_reward - step_penalty
             episode_step_rewards.append(step_reward)
             episode_step_penalties.append(step_penalty)
             episode_actions.append(action_to_take)
+
+            # Check if piece locked (locked cell count changed)
+            # Must check AFTER appending action so boundary is at correct index
+            next_locked_count = np.count_nonzero(next_obs[0, :board_size] == 1)
+            if next_locked_count != prev_locked_count:
+                # Piece locked - mark boundary at current index
+                # This makes the next action (index len(episode_actions)) start of new piece
+                episode_piece_boundaries.append(len(episode_actions))
+            prev_locked_count = next_locked_count
 
             obs = next_obs
 
