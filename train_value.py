@@ -204,11 +204,24 @@ def evaluate_agent(agent, n_episodes=10):
             action = agent.choose_action(obs[0], deterministic=True)
             obs, reward, terminated, truncated, info = env.step([action])
             done = terminated[0] or truncated[0]
-            episode_reward += reward[0]
 
-            # Track lines cleared
-            if isinstance(info, list) and len(info) > 0:
-                episode_lines = info[0].get('lines_cleared', 0) if isinstance(info[0], dict) else 0
+            # Extract line clear rewards only
+            step_reward = round(reward[0], 2)
+            if step_reward >= 0.09:
+                step_reward = round(step_reward / 0.1) * 0.1
+            else:
+                step_reward = 0.0
+            episode_reward += step_reward
+
+            # Track lines cleared by inferring from reward
+            if step_reward >= 0.99:
+                episode_lines += 4
+            elif step_reward >= 0.49:
+                episode_lines += 3
+            elif step_reward >= 0.29:
+                episode_lines += 2
+            elif step_reward >= 0.09:
+                episode_lines += 1
 
         total_rewards.append(episode_reward)
         total_lines.append(episode_lines)
