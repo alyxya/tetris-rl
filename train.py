@@ -22,7 +22,12 @@ from datetime import datetime
 from pufferlib.ocean.tetris import tetris
 from agents.heuristic_agent import HeuristicAgent
 from agents.q_agent import QValueAgent, TetrisQNetwork
-from utils.rewards import extract_line_clear_reward, compute_discounted_returns, count_lines_cleared
+from utils.rewards import (
+    extract_line_clear_reward,
+    compute_discounted_returns,
+    count_lines_cleared,
+    LineClearPenaltyTracker,
+)
 
 
 class TetrisDataset(Dataset):
@@ -74,9 +79,6 @@ def collect_data(
     n_rows = env.n_rows
     n_cols = env.n_cols
     board_size = n_rows * n_cols
-    n_rows = env.n_rows
-    n_cols = env.n_cols
-    board_size = n_rows * n_cols
 
     states_empty = []
     states_filled = []
@@ -100,6 +102,8 @@ def collect_data(
         episode_states_filled = []
         episode_actions = []
         episode_step_rewards = []
+
+        penalty_tracker = LineClearPenaltyTracker()
 
         while not done:
             # Parse observation
@@ -134,9 +138,11 @@ def collect_data(
             next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
             next_tick = next_obs[0, board_size]
             if next_tick < prev_tick:
+                penalty_tracker.reset()
                 step_reward = 0.0
             else:
-                step_reward = extract_line_clear_reward(prev_board, next_board)
+                base_reward = extract_line_clear_reward(prev_board, next_board)
+                step_reward = penalty_tracker.step(action_to_take, base_reward)
             episode_reward += step_reward
             episode_step_rewards.append(step_reward)
             episode_actions.append(action_to_take)
@@ -173,6 +179,8 @@ def evaluate_agent(agent, n_episodes=10):
         episode_reward = 0
         episode_lines = 0
 
+        penalty_tracker = LineClearPenaltyTracker()
+
         while not done:
             prev_board = obs[0, :board_size].reshape(n_rows, n_cols).copy()
             prev_tick = obs[0, board_size]
@@ -183,10 +191,12 @@ def evaluate_agent(agent, n_episodes=10):
             next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
             next_tick = next_obs[0, board_size]
             if next_tick < prev_tick:
+                penalty_tracker.reset()
                 step_reward = 0.0
                 lines_cleared = 0
             else:
-                step_reward = extract_line_clear_reward(prev_board, next_board)
+                base_reward = extract_line_clear_reward(prev_board, next_board)
+                step_reward = penalty_tracker.step(action, base_reward)
                 lines_cleared = count_lines_cleared(prev_board, next_board)
             episode_reward += step_reward
             episode_lines += lines_cleared

@@ -13,7 +13,7 @@ import argparse
 import time
 from pufferlib.ocean.tetris import tetris
 from agents import HeuristicAgent, QValueAgent, HybridAgent
-from utils.rewards import extract_line_clear_reward
+from utils.rewards import extract_line_clear_reward, LineClearPenaltyTracker
 
 
 def run_episode(env, agent, render=False, verbose=True, debug_values=False):
@@ -36,6 +36,7 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
     n_cols = env.n_cols
     board_size = n_rows * n_cols
     agent.reset()
+    penalty_tracker = LineClearPenaltyTracker()
 
     done = False
     total_reward = 0
@@ -61,9 +62,11 @@ def run_episode(env, agent, render=False, verbose=True, debug_values=False):
         next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
         next_tick = next_obs[0, board_size]
         if next_tick < prev_tick:
+            penalty_tracker.reset()
             step_reward = 0.0
         else:
-            step_reward = extract_line_clear_reward(prev_board, next_board)
+            base_reward = extract_line_clear_reward(prev_board, next_board)
+            step_reward = penalty_tracker.step(action, base_reward)
         total_reward += step_reward
         steps += 1
         done = terminated[0] or truncated[0]

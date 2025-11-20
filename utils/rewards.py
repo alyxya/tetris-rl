@@ -38,6 +38,34 @@ def compute_discounted_returns(rewards: Iterable[float], gamma: float = 0.99) ->
     return returns
 
 
+class LineClearPenaltyTracker:
+    """Track translation/rotation actions to apply proximity penalties on clears."""
+
+    def __init__(self, actions=None, penalty=0.01, decay=0.9):
+        self.actions = set(actions if actions is not None else (1, 2, 3))
+        self.penalty = float(penalty)
+        self.decay = float(decay)
+        self.pending: List[float] = []
+
+    def reset(self):
+        self.pending.clear()
+
+    def step(self, action: int, line_reward: float) -> float:
+        """Update tracker with the taken action and return shaped reward."""
+        self.pending = [value * self.decay for value in self.pending if value * self.decay > 1e-6]
+
+        if action in self.actions:
+            self.pending.append(self.penalty)
+
+        penalty_value = 0.0
+        if line_reward > 0.0:
+            penalty_value = sum(self.pending)
+            self.pending.clear()
+
+        shaped_reward = max(0.0, line_reward - penalty_value)
+        return shaped_reward
+
+
 def _ensure_board(board) -> np.ndarray:
     arr = np.asarray(board)
     if arr.ndim != 2:

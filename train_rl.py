@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 from pufferlib.ocean.tetris import tetris
 from agents.q_agent import TetrisQNetwork
-from utils.rewards import extract_line_clear_reward
+from utils.rewards import extract_line_clear_reward, LineClearPenaltyTracker
 
 
 def extract_boards(obs_flat, n_rows, n_cols):
@@ -144,6 +144,7 @@ def evaluate_model(model, device, n_episodes=10):
         obs, _ = env.reset(seed=int(time.time() * 1e6))
         done = False
         total_reward = 0.0
+        penalty_tracker = LineClearPenaltyTracker()
 
         while not done:
             board_empty, board_filled = extract_boards(obs[0], n_rows, n_cols)
@@ -159,9 +160,11 @@ def evaluate_model(model, device, n_episodes=10):
             next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
             next_tick = next_obs[0, board_size]
             if next_tick < prev_tick:
+                penalty_tracker.reset()
                 step_reward = 0.0
             else:
-                step_reward = extract_line_clear_reward(prev_board, next_board)
+                base_reward = extract_line_clear_reward(prev_board, next_board)
+                step_reward = penalty_tracker.step(action, base_reward)
             total_reward += step_reward
             obs = next_obs
 
@@ -256,6 +259,7 @@ def train_rl(
         board_empty, board_filled = extract_boards(obs[0], n_rows, n_cols)
         done = False
         episode_reward = 0.0
+        penalty_tracker = LineClearPenaltyTracker()
 
         frac = episode / max(1, n_episodes - 1)
         epsilon = max(epsilon_end, epsilon_start - frac * (epsilon_start - epsilon_end) * epsilon_decay)
@@ -270,9 +274,11 @@ def train_rl(
             next_board = next_obs[0, :board_size].reshape(n_rows, n_cols)
             next_tick = next_obs[0, board_size]
             if next_tick < prev_tick:
+                penalty_tracker.reset()
                 reward_value = 0.0
             else:
-                reward_value = extract_line_clear_reward(prev_board, next_board)
+                base_reward = extract_line_clear_reward(prev_board, next_board)
+                reward_value = penalty_tracker.step(action, base_reward)
 
             trainer.store((board_empty, board_filled, action, reward_value, next_empty, next_filled, float(done)))
             loss = trainer.optimize(batch_size)
