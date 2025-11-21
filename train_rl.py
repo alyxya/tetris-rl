@@ -128,7 +128,9 @@ def compute_heuristic_reward(locked_board, active_piece, next_locked_board, acti
     cols = np.array([p[1] for p in placements])
     rotations = np.array([p[0] for p in placements])
 
-    mean_all = float(np.mean(scores))
+    # Find score for current column and rotation 0 (identity orientation)
+    current_mask = (cols == current_left_col) & (rotations == 0)
+    current_score = float(scores[current_mask][0]) if current_mask.any() else 0.0
 
     left_mask = cols <= current_left_col
     mean_left = float(np.mean(scores[left_mask])) if left_mask.any() else 0.0
@@ -140,11 +142,11 @@ def compute_heuristic_reward(locked_board, active_piece, next_locked_board, acti
     mean_rotation = float(np.mean(scores[rotation_mask])) if rotation_mask.any() else 0.0
 
     raw_scores = {
-        ACTION_NO_OP: mean_all,
+        ACTION_NO_OP: current_score,
         ACTION_LEFT: mean_left,
         ACTION_RIGHT: mean_right,
         ACTION_ROTATE: mean_rotation,
-        ACTION_SOFT_DROP: mean_all,
+        ACTION_SOFT_DROP: current_score,
     }
 
     raw_values = np.array(list(raw_scores.values()), dtype=np.float32)
