@@ -21,8 +21,7 @@ from pufferlib.ocean.tetris import tetris
 from model import PolicyNetwork, ValueNetwork
 from value_agent import ValueAgent
 from policy_agent import PolicyAgent
-import heuristic as heuristic_module
-from heuristic import rotate_piece_cw
+from reward_utils import compute_all_heuristic_rewards, compute_heuristic_reward
 
 
 class ReplayBuffer:
@@ -52,118 +51,6 @@ class ReplayBuffer:
 
     def __len__(self):
         return len(self.buffer)
-
-
-ACTION_NO_OP = 0
-ACTION_LEFT = 1
-ACTION_RIGHT = 2
-ACTION_ROTATE = 3
-ACTION_SOFT_DROP = 4
-ACTION_HARD_DROP = 5
-ACTION_HOLD = 6
-
-
-def compute_heuristic_reward(locked_board, active_piece, next_locked_board, action):
-    """
-    Compute heuristic-based reward for the chosen action.
-
-    Reward structure:
-    1. Large immediate reward for line clears (if they happened)
-    2. Otherwise, normalize action-specific heuristic scores (mean 0, std 0.01)
-       based on placements across identity and single-rotation orientations.
-    """
-    piece_shape = extract_piece_shape_from_board(active_piece)
-    if piece_shape is None:
-        return 0.0
-
-    # Check if lines were cleared (compare locked block counts)
-    prev_locked_count = np.sum(locked_board > 0)
-    next_locked_count = np.sum(next_locked_board > 0)
-
-    # Calculate lines cleared (each cleared line removes 10 blocks, piece adds ~4 blocks)
-    # Delta = prev_count + piece_blocks - cleared_lines * 10
-    # So: cleared_lines = (prev_count + piece_blocks - next_count) / 10
-    piece_blocks = np.sum(piece_shape > 0)
-    delta = prev_locked_count + piece_blocks - next_locked_count
-    lines_cleared = max(0, delta // 10)  # Integer division
-
-    # Line clear rewards (scaled down by 10x from original)
-    line_clear_rewards = {0: 0.0, 1: 1.0, 2: 3.0, 3: 6.0, 4: 10.0}
-    line_reward = line_clear_rewards.get(lines_cleared, 0.0)
-
-    # If lines were cleared, return the large reward immediately
-    if lines_cleared > 0:
-        return line_reward
-
-    # Otherwise, compute action-based heuristic scores
-    # Get current piece position
-    piece_positions = np.argwhere(active_piece > 0)
-    current_left_col = piece_positions[:, 1].min()
-
-    # Evaluate placements for identity and single clockwise rotation only
-    n_cols = locked_board.shape[1]
-    rotations_to_consider = (0, 1)
-    placements = []  # List of (rotation, col, score)
-
-    for rotation in rotations_to_consider:
-        rotated_shape = piece_shape.copy()
-        for _ in range(rotation):
-            rotated_shape = rotate_piece_cw(rotated_shape)
-
-        piece_width = rotated_shape.shape[1]
-
-        for col in range(n_cols - piece_width + 1):
-            score, _ = heuristic_module.evaluate_placement(
-                locked_board, piece_shape, rotation, col
-            )
-
-            # Only consider valid placements
-            if score > float('-inf'):
-                placements.append((rotation, col, score))
-
-    if len(placements) == 0:
-        return 0.0
-
-    scores = np.array([p[2] for p in placements])
-    cols = np.array([p[1] for p in placements])
-    rotations = np.array([p[0] for p in placements])
-
-    # Find score for current column and rotation 0 (identity orientation)
-    current_mask = (cols == current_left_col) & (rotations == 0)
-    current_score = float(scores[current_mask][0]) if current_mask.any() else 0.0
-
-    left_mask = cols <= current_left_col
-    mean_left = float(np.mean(scores[left_mask])) if left_mask.any() else 0.0
-
-    right_mask = cols >= current_left_col
-    mean_right = float(np.mean(scores[right_mask])) if right_mask.any() else 0.0
-
-    rotation_mask = rotations > 0
-    mean_rotation = float(np.mean(scores[rotation_mask])) if rotation_mask.any() else 0.0
-
-    raw_scores = {
-        ACTION_NO_OP: current_score,
-        ACTION_LEFT: mean_left,
-        ACTION_RIGHT: mean_right,
-        ACTION_ROTATE: mean_rotation,
-        ACTION_SOFT_DROP: current_score,
-    }
-
-    raw_values = np.array(list(raw_scores.values()), dtype=np.float32)
-    raw_mean = float(raw_values.mean())
-    raw_std = float(raw_values.std())
-    if raw_std == 0.0:
-        raw_std = 1.0
-
-    normalized = (raw_values - raw_mean) / raw_std
-    target_std = 0.01
-    normalized *= target_std
-
-    rewards_by_action = np.zeros(7, dtype=np.float32)
-    for idx, act in enumerate(raw_scores.keys()):
-        rewards_by_action[act] = float(normalized[idx])
-
-    return float(rewards_by_action[action])
 
 
 def extract_piece_shape_from_board(active_piece):

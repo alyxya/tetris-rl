@@ -10,14 +10,16 @@ Usage examples:
 
 import argparse
 import time
+import numpy as np
 from pufferlib.ocean.tetris import tetris
 from heuristic_agent import HeuristicAgent
 from policy_agent import PolicyAgent
 from value_agent import ValueAgent
 from hybrid_agent import HybridAgent
+from reward_utils import compute_all_heuristic_rewards, ACTION_NAMES
 
 
-def run_episode(env, agent, render=False, verbose=True):
+def run_episode(env, agent, render=False, verbose=True, show_rewards=False):
     """
     Run a single episode with the given agent.
 
@@ -26,6 +28,7 @@ def run_episode(env, agent, render=False, verbose=True):
         agent: Agent to use
         render: Whether to render the game
         verbose: Whether to print progress
+        show_rewards: Whether to show heuristic rewards for each action
 
     Returns:
         steps: Number of steps taken
@@ -39,9 +42,30 @@ def run_episode(env, agent, render=False, verbose=True):
     while not done:
         # Extract observation from batch (env returns batched obs)
         obs_single = obs[0] if len(obs.shape) > 1 else obs
+
+        # Parse observation to get board states
+        if show_rewards and hasattr(agent, 'parse_observation'):
+            _, locked, active = agent.parse_observation(obs_single)
+
         action = agent.choose_action(obs_single)
         next_obs, _, terminated, truncated, _ = env.step([action])
         done = terminated[0] or truncated[0]
+
+        # Show heuristic rewards if requested
+        if show_rewards and hasattr(agent, 'parse_observation'):
+            next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
+            _, next_locked, _ = agent.parse_observation(next_obs_single)
+
+            rewards, lines_cleared = compute_all_heuristic_rewards(locked, active, next_locked)
+
+            if lines_cleared > 0:
+                print(f"\n  Step {steps}: Action={ACTION_NAMES[action]} (Lines cleared: {lines_cleared}, reward={rewards[action]:.4f})")
+            else:
+                print(f"\n  Step {steps}: Action={ACTION_NAMES[action]}")
+                print(f"    Rewards by action:")
+                for act in range(7):
+                    marker = " <--" if act == action else ""
+                    print(f"      {ACTION_NAMES[act]:>10s}: {rewards[act]:+.6f}{marker}")
 
         if render:
             env.render()
@@ -49,7 +73,7 @@ def run_episode(env, agent, render=False, verbose=True):
         steps += 1
         obs = next_obs
 
-        if verbose and steps % 100 == 0:
+        if verbose and not show_rewards and steps % 100 == 0:
             print(f"  Step {steps}")
 
     return steps
@@ -71,6 +95,8 @@ def main():
                         help='Print progress during episodes')
     parser.add_argument('--device', type=str, default='cpu',
                         help='Device for neural networks (cpu or cuda)')
+    parser.add_argument('--show-rewards', action='store_true',
+                        help='Show heuristic reward values for all actions at each step')
 
     # Policy agent options
     parser.add_argument('--deterministic', action='store_true',
@@ -180,7 +206,7 @@ def main():
                 return original_choose(obs, epsilon=args.epsilon)
             agent.choose_action = choose_action_wrapper
 
-        steps = run_episode(env, agent, render=args.render, verbose=args.verbose)
+        steps = run_episode(env, agent, render=args.render, verbose=args.verbose, show_rewards=args.show_rewards)
 
         # Restore original methods
         if args.agent in ['policy', 'value']:
