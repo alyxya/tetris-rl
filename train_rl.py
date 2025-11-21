@@ -103,9 +103,9 @@ def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
     horizontal_distance = abs(current_left_col - best_col)
     total_distance = rotation_distance + horizontal_distance + 1  # +1 for drop
 
-    # Small nudge: inverse of distance, scaled down by 100x
-    # Max nudge when distance=1 is 0.01, decreases as distance increases
-    nudge = 0.01 / total_distance
+    # Small nudge: inverse of distance, scaled down by 200x
+    # Max nudge when distance=1 is 0.005, decreases as distance increases
+    nudge = 0.005 / total_distance
 
     return nudge
 
