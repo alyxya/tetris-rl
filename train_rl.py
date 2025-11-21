@@ -241,9 +241,9 @@ def train_value_rl(args):
             _, next_locked, next_active = agent.parse_observation(next_obs_single)
 
             # Compute action-conditioned heuristic reward (line clears + normalized heuristic score)
-            # Don't compute reward on terminal states (game over)
+            # Apply penalty for losing the game
             if done:
-                reward = 0.0
+                reward = -1.0
             else:
                 reward = compute_heuristic_reward(locked, active, next_locked, action)
 
@@ -377,9 +377,9 @@ def train_policy_rl(args):
             _, next_locked, _ = agent.parse_observation(next_obs_single)
 
             # Compute action-conditioned heuristic reward (line clears + normalized heuristic score)
-            # Don't compute reward on terminal states (game over)
+            # Apply penalty for losing the game
             if done:
-                reward = 0.0
+                reward = -1.0
             else:
                 reward = compute_heuristic_reward(locked, active, next_locked, action)
             rewards.append(reward)
