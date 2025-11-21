@@ -185,7 +185,12 @@ def train_value_rl(args):
             _, next_locked, next_active = agent.parse_observation(next_obs_single)
 
             # Compute heuristic reward (line clears + distance nudge)
-            reward = compute_heuristic_reward(locked, active, next_locked)
+            # Don't compute reward on terminal states (game over)
+            if done:
+                reward = 0.0
+            else:
+                reward = compute_heuristic_reward(locked, active, next_locked)
+
             next_empty = next_locked.copy()
             next_filled = next_locked.copy()
             next_filled[next_active > 0] = 1.0
@@ -316,7 +321,11 @@ def train_policy_rl(args):
             _, next_locked, _ = agent.parse_observation(next_obs_single)
 
             # Compute heuristic reward (line clears + distance nudge)
-            reward = compute_heuristic_reward(locked, active, next_locked)
+            # Don't compute reward on terminal states (game over)
+            if done:
+                reward = 0.0
+            else:
+                reward = compute_heuristic_reward(locked, active, next_locked)
             rewards.append(reward)
 
             obs = next_obs
