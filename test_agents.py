@@ -6,7 +6,7 @@ import time
 
 # Test heuristic agent for a few steps
 print("Testing HeuristicAgent...")
-env = tetris.Tetris(seed=42)
+env = tetris.Tetris(seed=int(time.time() * 1e6))
 agent = HeuristicAgent()
 
 obs, _ = env.reset()

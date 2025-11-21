@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
+import time
 from pufferlib.ocean.tetris import tetris
 
 from model import PolicyNetwork, ValueNetwork
@@ -138,7 +139,7 @@ def train_value_network(args):
     device = torch.device(args.device)
 
     # Create environment and teacher
-    env = tetris.Tetris(seed=42)
+    env = tetris.Tetris(seed=int(time.time() * 1e6))
     teacher = HeuristicAgent()
 
     # Create model
@@ -214,7 +215,7 @@ def train_policy_network(args):
     device = torch.device(args.device)
 
     # Create environment and teacher
-    env = tetris.Tetris(seed=42)
+    env = tetris.Tetris(seed=int(time.time() * 1e6))
     teacher = HeuristicAgent()
 
     # Create model

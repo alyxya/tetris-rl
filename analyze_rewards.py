@@ -7,6 +7,7 @@ to help sanity check the reward structure before RL training.
 
 import argparse
 import numpy as np
+import time
 from pufferlib.ocean.tetris import tetris
 from heuristic_agent import HeuristicAgent
 from hybrid_agent import HybridAgent
@@ -141,7 +142,7 @@ def main():
     args = parser.parse_args()
 
     # Create environment
-    env = tetris.Tetris(seed=42)
+    env = tetris.Tetris(seed=int(time.time() * 1e6))
 
     # Create agent
     if args.agent == 'heuristic':

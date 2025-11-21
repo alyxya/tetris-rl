@@ -14,6 +14,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from collections import deque
 from tqdm import tqdm
+import time
 from pufferlib.ocean.tetris import tetris
 
 from model import PolicyNetwork, ValueNetwork
@@ -126,7 +127,7 @@ def train_value_rl(args):
     print("=" * 50)
 
     device = torch.device(args.device)
-    env = tetris.Tetris(seed=42)
+    env = tetris.Tetris(seed=int(time.time() * 1e6))
 
     # Create online and target networks
     online_net = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
@@ -250,7 +251,7 @@ def train_policy_rl(args):
     print("=" * 50)
 
     device = torch.device(args.device)
-    env = tetris.Tetris(seed=42)
+    env = tetris.Tetris(seed=int(time.time() * 1e6))
 
     # Create model
     model = PolicyNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
