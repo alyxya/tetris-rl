@@ -173,12 +173,23 @@ python main.py --agent hybrid --agents heuristic,value,random --probs 0.4,0.4,0.
 - **board_filled**: Shows final placement (value estimation)
 - Separates "current state" from "potential state" explicitly
 
-### Why Shared Heuristic?
-- Single source of truth for what "good" means
-- Heuristic agent provides teacher signal
-- Value network learns to predict heuristic scores
-- Policy network uses heuristic as training reward
-- Environment rewards (line clears) are too sparse for learning
+### Reward Structure
+
+**Two-component reward:**
+1. **Line clear reward** (immediate, large): 10/30/60/100 for 1/2/3/4 lines
+2. **Distance nudge** (small): `1.0 / (rotations + moves + 1)` toward optimal placement
+
+**Properties:**
+- Line clear rewards dominate (10-100x larger than nudges)
+- Nudges guide exploration when no lines are cleared
+- Max nudge = 1.0 (when 1 action away from optimal)
+- Typical nudge = 0.1-0.5 (a few actions away)
+- Heuristic agent still works the same (uses find_best_placement for decisions)
+
+**Why this structure:**
+- Sparse line clears alone are insufficient for learning
+- Dense nudges provide continuous gradient toward good play
+- Scale separation ensures line clears remain primary objective
 
 ### Why Minimal Flags?
 - Previous version had complex configuration and many unused features

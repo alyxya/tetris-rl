@@ -11,6 +11,7 @@ from pufferlib.ocean.tetris import tetris
 from heuristic_agent import HeuristicAgent
 from hybrid_agent import HybridAgent
 import heuristic as heuristic_module
+from train_rl import compute_heuristic_reward
 
 
 def collect_episode_rewards(env, agent, verbose=False):
@@ -32,19 +33,20 @@ def collect_episode_rewards(env, agent, verbose=False):
         obs_single = obs[0] if len(obs.shape) > 1 else obs
         action = agent.choose_action(obs_single)
 
-        # Get environment reward
+        # Parse current state
+        _, locked, active = agent.parse_observation(obs_single)
+
+        # Get environment reward and take step
         next_obs, env_reward, terminated, truncated, _ = env.step([action])
         done = terminated[0] or truncated[0]
         env_reward = env_reward[0] if hasattr(env_reward, '__getitem__') else env_reward
 
-        # Compute heuristic reward for this state
-        _, locked, active = agent.parse_observation(obs_single)
-        piece_shape = agent.extract_piece_shape(active)
+        # Parse next state
+        next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
+        _, next_locked, _ = agent.parse_observation(next_obs_single)
 
-        if piece_shape is not None:
-            _, _, heuristic_reward = heuristic_module.find_best_placement(locked, piece_shape)
-        else:
-            heuristic_reward = 0.0
+        # Compute heuristic reward (line clears + distance nudge)
+        heuristic_reward = compute_heuristic_reward(locked, active, next_locked)
 
         episode_data.append((steps, action, env_reward, heuristic_reward))
 

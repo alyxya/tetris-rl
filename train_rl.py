@@ -51,15 +51,61 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-def compute_heuristic_reward(locked_board, active_piece):
-    """Compute heuristic-based reward for current state."""
+def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
+    """
+    Compute heuristic-based reward.
+
+    Reward structure:
+    1. Large immediate reward for line clears (if they happened)
+    2. Small nudge based on distance to optimal placement (fewer actions = better)
+
+    The nudge is ~10x smaller than line clear rewards to guide exploration
+    without overwhelming the primary signal.
+    """
     piece_shape = extract_piece_shape_from_board(active_piece)
     if piece_shape is None:
         return 0.0
 
-    # Find best placement and use its score as reward
-    _, _, score = heuristic_module.find_best_placement(locked_board, piece_shape)
-    return score
+    # Check if lines were cleared (compare locked block counts)
+    prev_locked_count = np.sum(locked_board > 0)
+    next_locked_count = np.sum(next_locked_board > 0)
+
+    # Calculate lines cleared (each cleared line removes 10 blocks, piece adds ~4 blocks)
+    # Delta = prev_count + piece_blocks - cleared_lines * 10
+    # So: cleared_lines = (prev_count + piece_blocks - next_count) / 10
+    piece_blocks = np.sum(piece_shape > 0)
+    delta = prev_locked_count + piece_blocks - next_locked_count
+    lines_cleared = max(0, delta // 10)  # Integer division
+
+    # Line clear rewards (same scale as old heuristic)
+    line_clear_rewards = {0: 0.0, 1: 10.0, 2: 30.0, 3: 60.0, 4: 100.0}
+    line_reward = line_clear_rewards.get(lines_cleared, 0.0)
+
+    # If lines were cleared, return the large reward immediately
+    if lines_cleared > 0:
+        return line_reward
+
+    # Otherwise, compute small nudge based on distance to optimal placement
+    # Find best placement
+    best_rotation, best_col, _ = heuristic_module.find_best_placement(locked_board, piece_shape)
+
+    if best_col is None:
+        return 0.0  # No valid placement
+
+    # Get current piece position
+    piece_positions = np.argwhere(active_piece > 0)
+    current_left_col = piece_positions[:, 1].min()
+
+    # Calculate distance (rotations + horizontal moves + 1 for hard drop)
+    rotation_distance = best_rotation  # 0-3 rotations needed
+    horizontal_distance = abs(current_left_col - best_col)
+    total_distance = rotation_distance + horizontal_distance + 1  # +1 for drop
+
+    # Small nudge: inverse of distance, scaled to be ~10x smaller than line rewards
+    # Max nudge when distance=1 is 1.0, decreases as distance increases
+    nudge = 1.0 / total_distance
+
+    return nudge
 
 
 def extract_piece_shape_from_board(active_piece):
@@ -129,11 +175,11 @@ def train_value_rl(args):
             next_obs, _, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
-            # Compute heuristic reward (ignore environment reward)
-            reward = compute_heuristic_reward(locked, active)
-
             # Parse next state
             _, next_locked, next_active = agent.parse_observation(next_obs)
+
+            # Compute heuristic reward (line clears + distance nudge)
+            reward = compute_heuristic_reward(locked, active, next_locked)
             next_empty = next_locked.copy()
             next_filled = next_locked.copy()
             next_filled[next_active > 0] = 1.0
@@ -253,8 +299,11 @@ def train_policy_rl(args):
             next_obs, _, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
-            # Compute heuristic reward (ignore environment reward)
-            reward = compute_heuristic_reward(locked, active)
+            # Parse next state
+            _, next_locked, _ = agent.parse_observation(next_obs)
+
+            # Compute heuristic reward (line clears + distance nudge)
+            reward = compute_heuristic_reward(locked, active, next_locked)
             rewards.append(reward)
 
             obs = next_obs
