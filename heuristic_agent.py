@@ -78,7 +78,7 @@ class HeuristicAgent(BaseAgent):
 
             if self.target_column is None:
                 # No valid placement found, just drop
-                return ACTION_SOFT_DROP
+                return ACTION_HARD_DROP
 
         # Step 1: Rotate to target orientation
         if self.current_rotations < self.target_rotation:
@@ -95,4 +95,4 @@ class HeuristicAgent(BaseAgent):
         self.target_column = None
         self.target_rotation = None
         self.current_rotations = 0
-        return ACTION_SOFT_DROP
+        return ACTION_HARD_DROP
