@@ -22,6 +22,7 @@ from model import PolicyNetwork, ValueNetwork
 from value_agent import ValueAgent
 from policy_agent import PolicyAgent
 import heuristic as heuristic_module
+from heuristic import rotate_piece_cw
 
 
 class ReplayBuffer:
@@ -53,36 +54,23 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-def compute_action_distance(current_rotation, current_col, target_rotation, target_col):
+ACTION_NO_OP = 0
+ACTION_LEFT = 1
+ACTION_RIGHT = 2
+ACTION_ROTATE = 3
+ACTION_SOFT_DROP = 4
+ACTION_HARD_DROP = 5
+ACTION_HOLD = 6
+
+
+def compute_heuristic_reward(locked_board, active_piece, next_locked_board, action):
     """
-    Compute action distance between current position and target placement.
-
-    Args:
-        current_rotation: Current rotation state (0-3)
-        current_col: Current left column position
-        target_rotation: Target rotation state (0-3)
-        target_col: Target left column position
-
-    Returns:
-        Action count needed (rotations + horizontal moves + 1 for hard drop)
-    """
-    rotation_distance = target_rotation  # Assume starting from rotation 0
-    horizontal_distance = abs(current_col - target_col)
-    return rotation_distance + horizontal_distance + 1  # +1 for hard drop
-
-
-def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
-    """
-    Compute heuristic-based reward.
+    Compute heuristic-based reward for the chosen action.
 
     Reward structure:
     1. Large immediate reward for line clears (if they happened)
-    2. Expected value nudge based on probability-weighted heuristic scores
-       - Probability inversely proportional to action distance
-       - Normalized to mean 0, std ~0.01
-
-    The nudge is ~10x smaller than line clear rewards to guide exploration
-    without overwhelming the primary signal.
+    2. Otherwise, normalize action-specific heuristic scores (mean 0, std 0.01)
+       based on placements across identity and single-rotation orientations.
     """
     piece_shape = extract_piece_shape_from_board(active_piece)
     if piece_shape is None:
@@ -107,19 +95,20 @@ def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
     if lines_cleared > 0:
         return line_reward
 
-    # Otherwise, compute expected value nudge
+    # Otherwise, compute action-based heuristic scores
     # Get current piece position
     piece_positions = np.argwhere(active_piece > 0)
     current_left_col = piece_positions[:, 1].min()
 
-    # Evaluate all possible placements
+    # Evaluate placements for identity and single clockwise rotation only
     n_cols = locked_board.shape[1]
-    placements = []  # List of (rotation, col, score, distance)
+    rotations_to_consider = (0, 1)
+    placements = []  # List of (rotation, col, score)
 
-    for rotation in range(4):
+    for rotation in rotations_to_consider:
         rotated_shape = piece_shape.copy()
         for _ in range(rotation):
-            rotated_shape = heuristic_module.rotate_piece_cw(rotated_shape)
+            rotated_shape = rotate_piece_cw(rotated_shape)
 
         piece_width = rotated_shape.shape[1]
 
@@ -130,34 +119,49 @@ def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
 
             # Only consider valid placements
             if score > float('-inf'):
-                distance = compute_action_distance(0, current_left_col, rotation, col)
-                placements.append((rotation, col, score, distance))
+                placements.append((rotation, col, score))
 
     if len(placements) == 0:
         return 0.0
 
-    # Compute probabilities inversely proportional to distance
     scores = np.array([p[2] for p in placements])
-    distances = np.array([p[3] for p in placements])
+    cols = np.array([p[1] for p in placements])
+    rotations = np.array([p[0] for p in placements])
 
-    # Probability ~ 1/distance
-    inv_distances = 1.0 / distances
-    probabilities = inv_distances / np.sum(inv_distances)
+    mean_all = float(np.mean(scores))
 
-    # Compute expected value
-    expected_value = np.sum(probabilities * scores)
+    left_mask = cols <= current_left_col
+    mean_left = float(np.mean(scores[left_mask])) if left_mask.any() else 0.0
 
-    # Normalize: center around mean and scale to std ~0.01
-    # Use statistics from all placements to normalize
-    mean_value = np.mean(scores)
-    std_value = np.std(scores) if np.std(scores) > 0 else 1.0
+    right_mask = cols >= current_left_col
+    mean_right = float(np.mean(scores[right_mask])) if right_mask.any() else 0.0
 
-    # Normalize to zero mean, then scale to target std
-    normalized_reward = (expected_value - mean_value) / std_value
+    rotation_mask = rotations > 0
+    mean_rotation = float(np.mean(scores[rotation_mask])) if rotation_mask.any() else 0.0
+
+    raw_scores = {
+        ACTION_NO_OP: mean_all,
+        ACTION_LEFT: mean_left,
+        ACTION_RIGHT: mean_right,
+        ACTION_ROTATE: mean_rotation,
+        ACTION_SOFT_DROP: mean_all,
+    }
+
+    raw_values = np.array(list(raw_scores.values()), dtype=np.float32)
+    raw_mean = float(raw_values.mean())
+    raw_std = float(raw_values.std())
+    if raw_std == 0.0:
+        raw_std = 1.0
+
+    normalized = (raw_values - raw_mean) / raw_std
     target_std = 0.01
-    nudge = normalized_reward * target_std
+    normalized *= target_std
 
-    return nudge
+    rewards_by_action = np.zeros(7, dtype=np.float32)
+    for idx, act in enumerate(raw_scores.keys()):
+        rewards_by_action[act] = float(normalized[idx])
+
+    return float(rewards_by_action[action])
 
 
 def extract_piece_shape_from_board(active_piece):
@@ -234,12 +238,12 @@ def train_value_rl(args):
             next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
             _, next_locked, next_active = agent.parse_observation(next_obs_single)
 
-            # Compute heuristic reward (line clears + distance nudge)
+            # Compute action-conditioned heuristic reward (line clears + normalized heuristic score)
             # Don't compute reward on terminal states (game over)
             if done:
                 reward = 0.0
             else:
-                reward = compute_heuristic_reward(locked, active, next_locked)
+                reward = compute_heuristic_reward(locked, active, next_locked, action)
 
             next_empty = next_locked.copy()
             next_filled = next_locked.copy()
@@ -370,12 +374,12 @@ def train_policy_rl(args):
             next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
             _, next_locked, _ = agent.parse_observation(next_obs_single)
 
-            # Compute heuristic reward (line clears + distance nudge)
+            # Compute action-conditioned heuristic reward (line clears + normalized heuristic score)
             # Don't compute reward on terminal states (game over)
             if done:
                 reward = 0.0
             else:
-                reward = compute_heuristic_reward(locked, active, next_locked)
+                reward = compute_heuristic_reward(locked, active, next_locked, action)
             rewards.append(reward)
 
             obs = next_obs
