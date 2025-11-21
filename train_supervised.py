@@ -41,7 +41,7 @@ def collect_value_rollouts(agent, env, num_episodes, gamma=0.99):
     rewards = []
 
     for _ in tqdm(range(num_episodes), desc="Collecting rollouts"):
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=int(time.time() * 1e6))
         done = False
         episode_data = []
 
@@ -108,7 +108,7 @@ def collect_policy_rollouts(teacher, env, num_episodes):
     actions = []
 
     for _ in tqdm(range(num_episodes), desc="Collecting rollouts"):
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=int(time.time() * 1e6))
         done = False
 
         while not done:
@@ -139,7 +139,7 @@ def train_value_network(args):
     device = torch.device(args.device)
 
     # Create environment and teacher
-    env = tetris.Tetris(seed=int(time.time() * 1e6))
+    env = tetris.Tetris()
     teacher = HeuristicAgent()
 
     # Create model
@@ -215,7 +215,7 @@ def train_policy_network(args):
     device = torch.device(args.device)
 
     # Create environment and teacher
-    env = tetris.Tetris(seed=int(time.time() * 1e6))
+    env = tetris.Tetris()
     teacher = HeuristicAgent()
 
     # Create model

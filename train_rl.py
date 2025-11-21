@@ -127,7 +127,7 @@ def train_value_rl(args):
     print("=" * 50)
 
     device = torch.device(args.device)
-    env = tetris.Tetris(seed=int(time.time() * 1e6))
+    env = tetris.Tetris()
 
     # Create online and target networks
     online_net = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
@@ -157,7 +157,7 @@ def train_value_rl(args):
     agent.model = online_net
 
     for episode in tqdm(range(args.num_episodes), desc="Training"):
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=int(time.time() * 1e6))
         done = False
         total_reward = 0
         steps = 0
@@ -251,7 +251,7 @@ def train_policy_rl(args):
     print("=" * 50)
 
     device = torch.device(args.device)
-    env = tetris.Tetris(seed=int(time.time() * 1e6))
+    env = tetris.Tetris()
 
     # Create model
     model = PolicyNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
@@ -273,7 +273,7 @@ def train_policy_rl(args):
     best_reward = float('-inf')
 
     for episode in tqdm(range(args.num_episodes), desc="Training"):
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=int(time.time() * 1e6))
         done = False
 
         states_empty = []

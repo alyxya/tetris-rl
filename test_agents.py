@@ -6,10 +6,10 @@ import time
 
 # Test heuristic agent for a few steps
 print("Testing HeuristicAgent...")
-env = tetris.Tetris(seed=int(time.time() * 1e6))
+env = tetris.Tetris()
 agent = HeuristicAgent()
 
-obs, _ = env.reset()
+obs, _ = env.reset(seed=int(time.time() * 1e6))
 print(f"Initial obs shape: {obs.shape}")
 
 for step in range(10):

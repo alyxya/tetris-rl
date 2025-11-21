@@ -31,7 +31,7 @@ def run_episode(env, agent, render=False, verbose=True):
         steps: Number of steps taken
         total_reward: Total reward from environment
     """
-    obs, _ = env.reset()
+    obs, _ = env.reset(seed=int(time.time() * 1e6))
     agent.reset()
 
     done = False
@@ -97,8 +97,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Create environment
-    env = tetris.Tetris(seed=int(time.time() * 1e6))
+    # Create environment (seed passed to reset())
+    env = tetris.Tetris()
 
     # Create agent
     if args.agent == 'heuristic':

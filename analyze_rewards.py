@@ -23,7 +23,7 @@ def collect_episode_rewards(env, agent, verbose=False):
         episode_rewards: List of (step, action, env_reward, heuristic_reward) tuples
         total_steps: Total steps in episode
     """
-    obs, _ = env.reset()
+    obs, _ = env.reset(seed=int(time.time() * 1e6))
     agent.reset()
 
     episode_data = []
@@ -141,8 +141,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Create environment
-    env = tetris.Tetris(seed=int(time.time() * 1e6))
+    # Create environment (seed passed to reset())
+    env = tetris.Tetris()
 
     # Create agent
     if args.agent == 'heuristic':
