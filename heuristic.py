@@ -184,8 +184,7 @@ def find_best_placement(board, piece_shape, weights=None):
         best_score: Best heuristic score
     """
     n_cols = board.shape[1]
-    best_rotation = 0
-    best_col = None
+    best_options = []  # Store all (rotation, col) pairs with best score
     best_score = float('-inf')
 
     # Try all rotations and columns
@@ -201,7 +200,18 @@ def find_best_placement(board, piece_shape, weights=None):
 
             if score > best_score:
                 best_score = score
-                best_rotation = rotation
-                best_col = col
+                best_options = [(rotation, col)]
+            elif score == best_score:
+                best_options.append((rotation, col))
+
+    # Deterministically choose among tied options based on board state hash
+    if best_options:
+        # Create a hash from the board state (only locked pieces matter)
+        board_hash = hash(board.tobytes())
+        # Use hash to select from tied options
+        idx = board_hash % len(best_options)
+        best_rotation, best_col = best_options[idx]
+    else:
+        best_rotation, best_col = 0, None
 
     return best_rotation, best_col, best_score
