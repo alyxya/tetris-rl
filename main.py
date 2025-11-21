@@ -166,18 +166,18 @@ def main():
 
         # Special handling for policy agent parameters
         if args.agent == 'policy':
-            def choose_action_wrapper(obs):
-                return agent.choose_action(obs,
-                                         deterministic=args.deterministic,
-                                         temperature=args.temperature)
             original_choose = agent.choose_action
+            def choose_action_wrapper(obs):
+                return original_choose(obs,
+                                      deterministic=args.deterministic,
+                                      temperature=args.temperature)
             agent.choose_action = choose_action_wrapper
 
         # Special handling for value agent parameters
         if args.agent == 'value':
-            def choose_action_wrapper(obs):
-                return agent.choose_action(obs, epsilon=args.epsilon)
             original_choose = agent.choose_action
+            def choose_action_wrapper(obs):
+                return original_choose(obs, epsilon=args.epsilon)
             agent.choose_action = choose_action_wrapper
 
         steps = run_episode(env, agent, render=args.render, verbose=args.verbose)
