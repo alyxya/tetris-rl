@@ -311,7 +311,12 @@ def train_value_rl(args):
             torch.save(online_net.state_dict(), args.output)
             print(f"Saved best model with reward {best_reward:.2f}")
 
-    print("\nTraining complete!")
+    # Save final model
+    output_dir = os.path.dirname(args.output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    torch.save(online_net.state_dict(), args.output)
+    print(f"\nTraining complete! Final model saved to {args.output}")
 
 
 def train_policy_rl(args):
@@ -430,7 +435,12 @@ def train_policy_rl(args):
             torch.save(model.state_dict(), args.output)
             print(f"Saved best model with reward {best_reward:.2f}")
 
-    print("\nTraining complete!")
+    # Save final model
+    output_dir = os.path.dirname(args.output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    torch.save(model.state_dict(), args.output)
+    print(f"\nTraining complete! Final model saved to {args.output}")
 
 
 def main():
