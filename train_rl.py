@@ -22,6 +22,7 @@ from model import PolicyNetwork, ValueNetwork
 from value_agent import ValueAgent
 from policy_agent import PolicyAgent
 import heuristic as heuristic_module
+from tetris_simulator import simulate_step
 
 
 class ReplayBuffer:
@@ -71,18 +72,29 @@ def compute_action_distance(current_rotation, current_col, target_rotation, targ
     return rotation_distance + horizontal_distance + 1  # +1 for hard drop
 
 
-def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
+def compute_heuristic_reward(locked_board, active_piece, next_locked_board, action, piece_type=0, rotation=0, x=3, y=0, n_rollouts=10):
     """
-    Compute heuristic-based reward.
+    Compute heuristic-based reward using Monte Carlo rollouts.
 
     Reward structure:
     1. Large immediate reward for line clears (if they happened)
-    2. Expected value nudge based on probability-weighted heuristic scores
-       - Probability inversely proportional to action distance
-       - Normalized to mean 0, std ~0.01
+    2. Monte Carlo nudge: For each action, simulate random rollouts and average
+       the heuristic scores to get an expected value for that action.
+       Normalize these values to mean 0, std ~0.01.
 
-    The nudge is ~10x smaller than line clear rewards to guide exploration
-    without overwhelming the primary signal.
+    Args:
+        locked_board: Current locked board state (20x10)
+        active_piece: Current active piece on board (20x10)
+        next_locked_board: Next locked board state after action (20x10)
+        action: The action that was taken (0-6)
+        piece_type: Current piece type (0-6 for I, O, T, S, Z, J, L)
+        rotation: Current rotation (0-3)
+        x: Current x position (column)
+        y: Current y position (row)
+        n_rollouts: Number of random rollouts per action
+
+    Returns:
+        float: Reward value
     """
     piece_shape = extract_piece_shape_from_board(active_piece)
     if piece_shape is None:
@@ -107,57 +119,90 @@ def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
     if lines_cleared > 0:
         return line_reward
 
-    # Otherwise, compute expected value nudge
-    # Get current piece position
-    piece_positions = np.argwhere(active_piece > 0)
-    current_left_col = piece_positions[:, 1].min()
+    # Monte Carlo evaluation for each action
+    action_scores = {}
 
-    # Evaluate all possible placements
-    n_cols = locked_board.shape[1]
-    placements = []  # List of (rotation, col, score, distance)
+    for test_action in range(7):
+        rollout_scores = []
 
-    for rotation in range(4):
-        rotated_shape = piece_shape.copy()
-        for _ in range(rotation):
-            rotated_shape = heuristic_module.rotate_piece_cw(rotated_shape)
+        for _ in range(n_rollouts):
+            # Simulate the test action
+            simulated_grid = simulate_step(locked_board, test_action, piece_type, rotation, x, y)
 
-        piece_width = rotated_shape.shape[1]
+            # Now do a random rollout of a few more steps
+            current_grid = simulated_grid.copy()
+            rollout_depth = np.random.randint(1, 4)  # 1-3 more random actions
 
-        for col in range(n_cols - piece_width + 1):
-            score, _ = heuristic_module.evaluate_placement(
-                locked_board, piece_shape, rotation, col
-            )
+            for _ in range(rollout_depth):
+                random_action = np.random.randint(0, 7)
+                # Use default piece parameters for future simulations
+                current_grid = simulate_step(current_grid, random_action,
+                                            piece_type=np.random.randint(0, 7),
+                                            rotation=0, x=3, y=0)
 
-            # Only consider valid placements
-            if score > float('-inf'):
-                distance = compute_action_distance(0, current_left_col, rotation, col)
-                placements.append((rotation, col, score, distance))
+            # Evaluate final grid with heuristic
+            score = evaluate_grid_heuristic(current_grid)
+            rollout_scores.append(score)
 
-    if len(placements) == 0:
-        return 0.0
+        # Average score for this action
+        action_scores[test_action] = np.mean(rollout_scores)
 
-    # Compute probabilities inversely proportional to distance
-    scores = np.array([p[2] for p in placements])
-    distances = np.array([p[3] for p in placements])
-
-    # Probability ~ 1/distance
-    inv_distances = 1.0 / distances
-    probabilities = inv_distances / np.sum(inv_distances)
-
-    # Compute expected value
-    expected_value = np.sum(probabilities * scores)
+    # Extract scores for normalization
+    all_scores = np.array([action_scores[a] for a in range(7)])
 
     # Normalize: center around mean and scale to std ~0.01
-    # Use statistics from all placements to normalize
-    mean_value = np.mean(scores)
-    std_value = np.std(scores) if np.std(scores) > 0 else 1.0
+    mean_value = np.mean(all_scores)
+    std_value = np.std(all_scores) if np.std(all_scores) > 0 else 1.0
+
+    # Get the score for the action that was actually taken
+    action_value = action_scores[action]
 
     # Normalize to zero mean, then scale to target std
-    normalized_reward = (expected_value - mean_value) / std_value
+    normalized_reward = (action_value - mean_value) / std_value
     target_std = 0.01
     nudge = normalized_reward * target_std
 
     return nudge
+
+
+def evaluate_grid_heuristic(grid):
+    """
+    Evaluate a grid state using simple heuristics.
+
+    Args:
+        grid: 20x10 numpy array
+
+    Returns:
+        float: Heuristic score (higher is better)
+    """
+    # Simple heuristics: penalize height, holes, and bumpiness
+    heights = []
+    holes = 0
+
+    for col in range(10):
+        column = grid[:, col]
+        filled = np.where(column != 0)[0]
+        if len(filled) > 0:
+            height = 20 - filled[0]  # Height from bottom
+            heights.append(height)
+
+            # Count holes (empty cells below filled cells)
+            for row in range(filled[0] + 1, 20):
+                if grid[row, col] == 0:
+                    holes += 1
+        else:
+            heights.append(0)
+
+    avg_height = np.mean(heights)
+    max_height = np.max(heights)
+
+    # Bumpiness: sum of absolute height differences between adjacent columns
+    bumpiness = sum(abs(heights[i] - heights[i+1]) for i in range(9))
+
+    # Score (negative because we want to minimize these)
+    score = -1.0 * avg_height - 2.0 * holes - 0.5 * bumpiness - 0.5 * max_height
+
+    return score
 
 
 def extract_piece_shape_from_board(active_piece):
@@ -234,12 +279,12 @@ def train_value_rl(args):
             next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
             _, next_locked, next_active = agent.parse_observation(next_obs_single)
 
-            # Compute heuristic reward (line clears + distance nudge)
+            # Compute heuristic reward (line clears + Monte Carlo nudge)
             # Don't compute reward on terminal states (game over)
             if done:
                 reward = 0.0
             else:
-                reward = compute_heuristic_reward(locked, active, next_locked)
+                reward = compute_heuristic_reward(locked, active, next_locked, action)
 
             next_empty = next_locked.copy()
             next_filled = next_locked.copy()
@@ -370,12 +415,12 @@ def train_policy_rl(args):
             next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
             _, next_locked, _ = agent.parse_observation(next_obs_single)
 
-            # Compute heuristic reward (line clears + distance nudge)
+            # Compute heuristic reward (line clears + Monte Carlo nudge)
             # Don't compute reward on terminal states (game over)
             if done:
                 reward = 0.0
             else:
-                reward = compute_heuristic_reward(locked, active, next_locked)
+                reward = compute_heuristic_reward(locked, active, next_locked, action)
             rewards.append(reward)
 
             obs = next_obs
