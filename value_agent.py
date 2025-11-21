@@ -6,6 +6,7 @@ Uses a neural network to output Q-values for each action and selects greedily.
 
 import numpy as np
 import torch
+import os
 from base_agent import BaseAgent
 from model import ValueNetwork
 
@@ -74,6 +75,9 @@ class ValueAgent(BaseAgent):
 
     def save_model(self, path):
         """Save model weights to disk."""
+        output_dir = os.path.dirname(path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         torch.save(self.model.state_dict(), path)
         print(f"Value model saved to {path}")
 

@@ -7,6 +7,7 @@ Uses a neural network to output action logits and samples from the distribution.
 import numpy as np
 import torch
 import torch.nn.functional as F
+import os
 from base_agent import BaseAgent
 from model import PolicyNetwork
 
@@ -78,6 +79,9 @@ class PolicyAgent(BaseAgent):
 
     def save_model(self, path):
         """Save model weights to disk."""
+        output_dir = os.path.dirname(path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         torch.save(self.model.state_dict(), path)
         print(f"Policy model saved to {path}")
 

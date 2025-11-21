@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 import time
+import os
 from pufferlib.ocean.tetris import tetris
 
 from model import PolicyNetwork, ValueNetwork
@@ -201,6 +202,9 @@ def train_value_network(args):
         # Save best model
         if avg_loss < best_loss:
             best_loss = avg_loss
+            output_dir = os.path.dirname(args.output)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
             torch.save(model.state_dict(), args.output)
             print(f"Saved best model to {args.output}")
 
@@ -274,6 +278,9 @@ def train_policy_network(args):
         # Save best model
         if avg_loss < best_loss:
             best_loss = avg_loss
+            output_dir = os.path.dirname(args.output)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
             torch.save(model.state_dict(), args.output)
             print(f"Saved best model to {args.output}")
 

@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from collections import deque
 from tqdm import tqdm
 import time
+import os
 from pufferlib.ocean.tetris import tetris
 
 from model import PolicyNetwork, ValueNetwork
@@ -243,6 +244,9 @@ def train_value_rl(args):
         # Save best model
         if total_reward > best_reward:
             best_reward = total_reward
+            output_dir = os.path.dirname(args.output)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
             torch.save(online_net.state_dict(), args.output)
             print(f"Saved best model with reward {best_reward:.2f}")
 
@@ -355,6 +359,9 @@ def train_policy_rl(args):
         # Save best model
         if total_reward > best_reward:
             best_reward = total_reward
+            output_dir = os.path.dirname(args.output)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
             torch.save(model.state_dict(), args.output)
             print(f"Saved best model with reward {best_reward:.2f}")
 
