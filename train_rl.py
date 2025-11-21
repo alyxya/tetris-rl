@@ -53,13 +53,33 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
+def compute_action_distance(current_rotation, current_col, target_rotation, target_col):
+    """
+    Compute action distance between current position and target placement.
+
+    Args:
+        current_rotation: Current rotation state (0-3)
+        current_col: Current left column position
+        target_rotation: Target rotation state (0-3)
+        target_col: Target left column position
+
+    Returns:
+        Action count needed (rotations + horizontal moves + 1 for hard drop)
+    """
+    rotation_distance = target_rotation  # Assume starting from rotation 0
+    horizontal_distance = abs(current_col - target_col)
+    return rotation_distance + horizontal_distance + 1  # +1 for hard drop
+
+
 def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
     """
     Compute heuristic-based reward.
 
     Reward structure:
     1. Large immediate reward for line clears (if they happened)
-    2. Small nudge based on distance to optimal placement (fewer actions = better)
+    2. Expected value nudge based on probability-weighted heuristic scores
+       - Probability inversely proportional to action distance
+       - Normalized to mean 0, std ~0.01
 
     The nudge is ~10x smaller than line clear rewards to guide exploration
     without overwhelming the primary signal.
@@ -87,25 +107,55 @@ def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
     if lines_cleared > 0:
         return line_reward
 
-    # Otherwise, compute small nudge based on distance to optimal placement
-    # Find best placement
-    best_rotation, best_col, _ = heuristic_module.find_best_placement(locked_board, piece_shape)
-
-    if best_col is None:
-        return 0.0  # No valid placement
-
+    # Otherwise, compute expected value nudge
     # Get current piece position
     piece_positions = np.argwhere(active_piece > 0)
     current_left_col = piece_positions[:, 1].min()
 
-    # Calculate distance (rotations + horizontal moves + 1 for hard drop)
-    rotation_distance = best_rotation  # 0-3 rotations needed
-    horizontal_distance = abs(current_left_col - best_col)
-    total_distance = rotation_distance + horizontal_distance + 1  # +1 for drop
+    # Evaluate all possible placements
+    n_cols = locked_board.shape[1]
+    placements = []  # List of (rotation, col, score, distance)
 
-    # Small nudge: inverse of distance, scaled down by 200x
-    # Max nudge when distance=1 is 0.005, decreases as distance increases
-    nudge = 0.005 / total_distance
+    for rotation in range(4):
+        rotated_shape = piece_shape.copy()
+        for _ in range(rotation):
+            rotated_shape = heuristic_module.rotate_piece_cw(rotated_shape)
+
+        piece_width = rotated_shape.shape[1]
+
+        for col in range(n_cols - piece_width + 1):
+            score, _ = heuristic_module.evaluate_placement(
+                locked_board, piece_shape, rotation, col
+            )
+
+            # Only consider valid placements
+            if score > float('-inf'):
+                distance = compute_action_distance(0, current_left_col, rotation, col)
+                placements.append((rotation, col, score, distance))
+
+    if len(placements) == 0:
+        return 0.0
+
+    # Compute probabilities inversely proportional to distance
+    scores = np.array([p[2] for p in placements])
+    distances = np.array([p[3] for p in placements])
+
+    # Probability ~ 1/distance
+    inv_distances = 1.0 / distances
+    probabilities = inv_distances / np.sum(inv_distances)
+
+    # Compute expected value
+    expected_value = np.sum(probabilities * scores)
+
+    # Normalize: center around mean and scale to std ~0.01
+    # Use statistics from all placements to normalize
+    mean_value = np.mean(scores)
+    std_value = np.std(scores) if np.std(scores) > 0 else 1.0
+
+    # Normalize to zero mean, then scale to target std
+    normalized_reward = (expected_value - mean_value) / std_value
+    target_std = 0.01
+    nudge = normalized_reward * target_std
 
     return nudge
 
