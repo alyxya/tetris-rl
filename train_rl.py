@@ -93,7 +93,6 @@ def train_value_rl(args):
     replay_buffer = ReplayBuffer(args.buffer_size)
 
     # Training loop
-    best_reward = float('-inf')
     epsilon = args.epsilon_start
     epsilon_decay = (args.epsilon_start - args.epsilon_end) / args.num_episodes
 
@@ -188,14 +187,13 @@ def train_value_rl(args):
         if episode % 10 == 0:
             print(f"\nEpisode {episode} - Steps: {steps}, Reward: {total_reward:.2f}, Epsilon: {epsilon:.3f}")
 
-        # Save best model
-        if total_reward > best_reward:
-            best_reward = total_reward
+        # Save model at regular intervals
+        if episode % args.save_interval == 0 and episode > 0:
             output_dir = os.path.dirname(args.output)
             if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
             torch.save(online_net.state_dict(), args.output)
-            print(f"Saved best model with reward {best_reward:.2f}")
+            print(f"Saved model at episode {episode}")
 
     # Save final model
     output_dir = os.path.dirname(args.output)
@@ -229,8 +227,6 @@ def train_policy_rl(args):
 
     agent = PolicyAgent(device=args.device)
     agent.model = model
-
-    best_reward = float('-inf')
 
     for episode in tqdm(range(args.num_episodes), desc="Training"):
         obs, _ = env.reset(seed=int(time.time() * 1e6))
@@ -311,14 +307,13 @@ def train_policy_rl(args):
         if episode % 10 == 0:
             print(f"\nEpisode {episode} - Steps: {len(rewards)}, Reward: {total_reward:.2f}")
 
-        # Save best model
-        if total_reward > best_reward:
-            best_reward = total_reward
+        # Save model at regular intervals
+        if episode % args.save_interval == 0 and episode > 0:
             output_dir = os.path.dirname(args.output)
             if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
             torch.save(model.state_dict(), args.output)
-            print(f"Saved best model with reward {best_reward:.2f}")
+            print(f"Saved model at episode {episode}")
 
     # Save final model
     output_dir = os.path.dirname(args.output)
@@ -346,6 +341,8 @@ def main():
                         help="Path to pretrained model to initialize from")
     parser.add_argument('--grad-clip', type=float, default=1.0,
                         help="Gradient clipping threshold")
+    parser.add_argument('--save-interval', type=int, default=100,
+                        help="Save model every N episodes")
 
     # Value-specific args
     parser.add_argument('--buffer-size', type=int, default=10000,
