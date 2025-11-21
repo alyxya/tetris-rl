@@ -77,8 +77,8 @@ def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
     delta = prev_locked_count + piece_blocks - next_locked_count
     lines_cleared = max(0, delta // 10)  # Integer division
 
-    # Line clear rewards (same scale as old heuristic)
-    line_clear_rewards = {0: 0.0, 1: 10.0, 2: 30.0, 3: 60.0, 4: 100.0}
+    # Line clear rewards (scaled down by 10x from original)
+    line_clear_rewards = {0: 0.0, 1: 1.0, 2: 3.0, 3: 6.0, 4: 10.0}
     line_reward = line_clear_rewards.get(lines_cleared, 0.0)
 
     # If lines were cleared, return the large reward immediately
@@ -101,9 +101,9 @@ def compute_heuristic_reward(locked_board, active_piece, next_locked_board):
     horizontal_distance = abs(current_left_col - best_col)
     total_distance = rotation_distance + horizontal_distance + 1  # +1 for drop
 
-    # Small nudge: inverse of distance, scaled to be ~10x smaller than line rewards
-    # Max nudge when distance=1 is 1.0, decreases as distance increases
-    nudge = 1.0 / total_distance
+    # Small nudge: inverse of distance, scaled down by 100x
+    # Max nudge when distance=1 is 0.01, decreases as distance increases
+    nudge = 0.01 / total_distance
 
     return nudge
 

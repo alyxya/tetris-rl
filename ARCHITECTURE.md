@@ -176,14 +176,14 @@ python main.py --agent hybrid --agents heuristic,value,random --probs 0.4,0.4,0.
 ### Reward Structure
 
 **Two-component reward:**
-1. **Line clear reward** (immediate, large): 10/30/60/100 for 1/2/3/4 lines
-2. **Distance nudge** (small): `1.0 / (rotations + moves + 1)` toward optimal placement
+1. **Line clear reward** (immediate, large): 1.0/3.0/6.0/10.0 for 1/2/3/4 lines
+2. **Distance nudge** (small): `0.01 / (rotations + moves + 1)` toward optimal placement
 
 **Properties:**
-- Line clear rewards dominate (10-100x larger than nudges)
+- Line clear rewards dominate (100-1000x larger than nudges)
 - Nudges guide exploration when no lines are cleared
-- Max nudge = 1.0 (when 1 action away from optimal)
-- Typical nudge = 0.1-0.5 (a few actions away)
+- Max nudge = 0.01 (when 1 action away from optimal)
+- Typical nudge = 0.001-0.005 (a few actions away)
 - Heuristic agent still works the same (uses find_best_placement for decisions)
 
 **Why this structure:**
