@@ -163,21 +163,25 @@ def train_value_rl(args):
         steps = 0
 
         while not done:
+            # Extract single observation from batch
+            obs_single = obs[0] if len(obs.shape) > 1 else obs
+
             # Parse state
-            _, locked, active = agent.parse_observation(obs)
+            _, locked, active = agent.parse_observation(obs_single)
             board_empty = locked.copy()
             board_filled = locked.copy()
             board_filled[active > 0] = 1.0
 
             # Epsilon-greedy action selection
-            action = agent.choose_action(obs, epsilon=epsilon)
+            action = agent.choose_action(obs_single, epsilon=epsilon)
 
             # Take step
-            next_obs, _, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
+            next_obs, _, terminated, truncated, _ = env.step([action])
+            done = terminated[0] or truncated[0]
 
             # Parse next state
-            _, next_locked, next_active = agent.parse_observation(next_obs)
+            next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
+            _, next_locked, next_active = agent.parse_observation(next_obs_single)
 
             # Compute heuristic reward (line clears + distance nudge)
             reward = compute_heuristic_reward(locked, active, next_locked)
@@ -283,8 +287,11 @@ def train_policy_rl(args):
 
         # Collect episode
         while not done:
+            # Extract single observation from batch
+            obs_single = obs[0] if len(obs.shape) > 1 else obs
+
             # Parse state
-            _, locked, active = agent.parse_observation(obs)
+            _, locked, active = agent.parse_observation(obs_single)
             board_empty = locked.copy()
             board_filled = locked.copy()
             board_filled[active > 0] = 1.0
@@ -293,15 +300,16 @@ def train_policy_rl(args):
             states_filled.append(board_filled)
 
             # Sample action
-            action = agent.choose_action(obs, deterministic=False, temperature=args.temperature)
+            action = agent.choose_action(obs_single, deterministic=False, temperature=args.temperature)
             actions.append(action)
 
             # Take step
-            next_obs, _, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
+            next_obs, _, terminated, truncated, _ = env.step([action])
+            done = terminated[0] or truncated[0]
 
             # Parse next state
-            _, next_locked, _ = agent.parse_observation(next_obs)
+            next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
+            _, next_locked, _ = agent.parse_observation(next_obs_single)
 
             # Compute heuristic reward (line clears + distance nudge)
             reward = compute_heuristic_reward(locked, active, next_locked)
