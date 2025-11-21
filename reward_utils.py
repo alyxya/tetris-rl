@@ -109,9 +109,31 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
     cols = np.array([p[1] for p in placements])
     rotations = np.array([p[0] for p in placements])
 
-    # Find score for current column and rotation 0 (identity orientation)
-    current_mask = (cols == current_left_col) & (rotations == 0)
-    current_score = float(scores[current_mask][0]) if current_mask.any() else 0.0
+    # Filter to only non-rotated pieces (rotation 0) for NO_OP and SOFT_DROP
+    nonrotated_mask = rotations == 0
+    nonrotated_scores = scores[nonrotated_mask]
+    nonrotated_cols = cols[nonrotated_mask]
+
+    # NO_OP: Weighted average skewed towards current column
+    if len(nonrotated_scores) > 0:
+        # Weight inversely proportional to distance from current column
+        distances = np.abs(nonrotated_cols - current_left_col)
+        # Use moderate exponential decay: weight = exp(-distance)
+        weights_no_op = np.exp(-distances.astype(float))
+        weights_no_op /= np.sum(weights_no_op)  # Normalize
+        no_op_score = float(np.sum(weights_no_op * nonrotated_scores))
+    else:
+        no_op_score = 0.0
+
+    # SOFT_DROP: Weighted average more strongly skewed towards current column
+    if len(nonrotated_scores) > 0:
+        distances = np.abs(nonrotated_cols - current_left_col)
+        # Use stronger exponential decay: weight = exp(-2 * distance) for tighter focus
+        weights_soft_drop = np.exp(-2.0 * distances.astype(float))
+        weights_soft_drop /= np.sum(weights_soft_drop)  # Normalize
+        soft_drop_score = float(np.sum(weights_soft_drop * nonrotated_scores))
+    else:
+        soft_drop_score = 0.0
 
     left_mask = cols <= current_left_col
     mean_left = float(np.mean(scores[left_mask])) if left_mask.any() else 0.0
@@ -123,11 +145,11 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
     mean_rotation = float(np.mean(scores[rotation_mask])) if rotation_mask.any() else 0.0
 
     raw_scores = {
-        ACTION_NO_OP: current_score,
+        ACTION_NO_OP: no_op_score,
         ACTION_LEFT: mean_left,
         ACTION_RIGHT: mean_right,
         ACTION_ROTATE: mean_rotation,
-        ACTION_SOFT_DROP: current_score,
+        ACTION_SOFT_DROP: soft_drop_score,
     }
 
     raw_values = np.array(list(raw_scores.values()), dtype=np.float32)
