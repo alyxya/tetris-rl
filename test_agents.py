@@ -15,8 +15,8 @@ print(f"Initial obs shape: {obs.shape}")
 for step in range(10):
     obs_single = obs[0] if len(obs.shape) > 1 else obs
     action = agent.choose_action(obs_single)
-    next_obs, reward, terminated, truncated, _ = env.step([action])
-    print(f"Step {step}: action={action}, reward={reward[0]:.2f}, done={terminated[0] or truncated[0]}")
+    next_obs, _, terminated, truncated, _ = env.step([action])
+    print(f"Step {step}: action={action}, done={terminated[0] or truncated[0]}")
 
     if terminated[0] or truncated[0]:
         print("Episode terminated")

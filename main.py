@@ -29,33 +29,30 @@ def run_episode(env, agent, render=False, verbose=True):
 
     Returns:
         steps: Number of steps taken
-        total_reward: Total reward from environment
     """
     obs, _ = env.reset(seed=int(time.time() * 1e6))
     agent.reset()
 
     done = False
-    total_reward = 0
     steps = 0
 
     while not done:
         # Extract observation from batch (env returns batched obs)
         obs_single = obs[0] if len(obs.shape) > 1 else obs
         action = agent.choose_action(obs_single)
-        next_obs, reward, terminated, truncated, _ = env.step([action])
+        next_obs, _, terminated, truncated, _ = env.step([action])
         done = terminated[0] or truncated[0]
 
         if render:
             env.render()
 
-        total_reward += reward[0] if hasattr(reward, '__getitem__') else reward
         steps += 1
         obs = next_obs
 
         if verbose and steps % 100 == 0:
-            print(f"  Step {steps}, Total reward: {total_reward:.2f}")
+            print(f"  Step {steps}")
 
-    return steps, total_reward
+    return steps
 
 
 def main():
@@ -162,7 +159,6 @@ def main():
 
     # Run episodes
     all_steps = []
-    all_rewards = []
 
     for episode in range(args.episodes):
         if args.episodes > 1:
@@ -184,16 +180,15 @@ def main():
             original_choose = agent.choose_action
             agent.choose_action = choose_action_wrapper
 
-        steps, reward = run_episode(env, agent, render=args.render, verbose=args.verbose)
+        steps = run_episode(env, agent, render=args.render, verbose=args.verbose)
 
         # Restore original methods
         if args.agent in ['policy', 'value']:
             agent.choose_action = original_choose
 
         all_steps.append(steps)
-        all_rewards.append(reward)
 
-        print(f"Episode {episode + 1} finished: {steps} steps, reward: {reward:.2f}")
+        print(f"Episode {episode + 1} finished: {steps} steps")
 
         # Print usage stats for hybrid agent
         if args.agent == 'hybrid':
@@ -205,9 +200,8 @@ def main():
     if args.episodes > 1:
         print(f"\n=== Summary ===")
         print(f"Average steps: {sum(all_steps) / len(all_steps):.2f}")
-        print(f"Average reward: {sum(all_rewards) / len(all_rewards):.2f}")
-        print(f"Best reward: {max(all_rewards):.2f}")
-        print(f"Worst reward: {min(all_rewards):.2f}")
+        print(f"Max steps: {max(all_steps)}")
+        print(f"Min steps: {min(all_steps)}")
 
     env.close()
 
