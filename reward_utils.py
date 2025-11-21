@@ -135,10 +135,10 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
     else:
         soft_drop_score = 0.0
 
-    left_mask = cols <= current_left_col
+    left_mask = cols < current_left_col
     mean_left = float(np.mean(scores[left_mask])) if left_mask.any() else 0.0
 
-    right_mask = cols >= current_left_col
+    right_mask = cols > current_left_col
     mean_right = float(np.mean(scores[right_mask])) if right_mask.any() else 0.0
 
     rotation_mask = rotations > 0
@@ -160,7 +160,8 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
 
     normalized = (raw_values - raw_mean) / raw_std
     target_std = 0.01
-    normalized *= target_std
+    target_mean = 0.001
+    normalized = normalized * target_std + target_mean
 
     rewards_by_action = np.zeros(7, dtype=np.float32)
     for idx, act in enumerate(raw_scores.keys()):
