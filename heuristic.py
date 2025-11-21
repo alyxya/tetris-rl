@@ -206,11 +206,14 @@ def find_best_placement(board, piece_shape, weights=None):
 
     # Deterministically choose among tied options based on board state hash
     if best_options:
-        # Create a hash from the board state (only locked pieces matter)
+        # First, prefer placements with fewer rotations
+        min_rotations = min(rot for rot, col in best_options)
+        fewest_rotation_options = [(rot, col) for rot, col in best_options if rot == min_rotations]
+
+        # Then use hash-based selection among those with fewest rotations
         board_hash = hash(board.tobytes())
-        # Use hash to select from tied options
-        idx = board_hash % len(best_options)
-        best_rotation, best_col = best_options[idx]
+        idx = board_hash % len(fewest_rotation_options)
+        best_rotation, best_col = fewest_rotation_options[idx]
     else:
         best_rotation, best_col = 0, None
 
