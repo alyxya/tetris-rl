@@ -170,14 +170,12 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
     for idx, act in enumerate(valid_scores.keys()):
         normalized_dict[act] = float(normalized[idx])
 
-    # Assign rewards: use normalized value if available, otherwise use NO_OP's reward
+    # Assign rewards: use normalized value if available, otherwise use 0.0
     rewards_by_action = np.zeros(7, dtype=np.float32)
-    no_op_reward = normalized_dict.get(ACTION_NO_OP, 0.0)
     for act in raw_scores.keys():
         if act in normalized_dict:
             rewards_by_action[act] = normalized_dict[act]
-        else:
-            rewards_by_action[act] = no_op_reward
+        # else: remains 0.0 from initialization
 
     return rewards_by_action, 0
 
