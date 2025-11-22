@@ -125,13 +125,10 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
     else:
         no_op_score = 0.0
 
-    # SOFT_DROP: Weighted average more strongly skewed towards current column
-    if len(nonrotated_scores) > 0:
-        distances = np.abs(nonrotated_cols - current_left_col)
-        # Use stronger exponential decay: weight = exp(-2 * distance) for tighter focus
-        weights_soft_drop = np.exp(-2.0 * distances.astype(float))
-        weights_soft_drop /= np.sum(weights_soft_drop)  # Normalize
-        soft_drop_score = float(np.sum(weights_soft_drop * nonrotated_scores))
+    # SOFT_DROP: Score at current column position
+    current_col_mask = nonrotated_cols == current_left_col
+    if current_col_mask.any():
+        soft_drop_score = float(nonrotated_scores[current_col_mask][0])
     else:
         soft_drop_score = None
 
