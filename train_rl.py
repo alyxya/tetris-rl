@@ -329,7 +329,7 @@ def main():
                         help="Training mode: 'value' or 'policy'")
     parser.add_argument('--num-episodes', type=int, default=1000,
                         help="Number of episodes to train")
-    parser.add_argument('--lr', type=float, default=3e-4,
+    parser.add_argument('--lr', type=float, default=1e-4,
                         help="Learning rate")
     parser.add_argument('--gamma', type=float, default=0.99,
                         help="Discount factor")
