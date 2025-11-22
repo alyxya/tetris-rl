@@ -33,7 +33,7 @@ class ValueAgent(BaseAgent):
         if model_path is not None:
             self.load_model(model_path)
 
-    def choose_action(self, obs, epsilon=0.0, temperature=0.1):
+    def choose_action(self, obs, epsilon=0.0, temperature=0.001):
         """
         Choose action with epsilon-greedy and Boltzmann exploration.
 
