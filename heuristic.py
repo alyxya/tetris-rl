@@ -129,7 +129,7 @@ def evaluate_placement(board, piece_shape, rotation, target_col, weights=None):
         piece_shape: Current piece shape (2D array)
         rotation: Number of clockwise rotations to apply (0-3)
         target_col: Left column to drop at
-        weights: Dict with keys 'lines', 'height', 'holes', 'bumpiness'
+        weights: Dict with keys 'lines', 'height', 'aggregate_height', 'holes', 'bumpiness'
 
     Returns:
         score: Heuristic score (higher is better)
@@ -138,10 +138,11 @@ def evaluate_placement(board, piece_shape, rotation, target_col, weights=None):
     if weights is None:
         # Default weights emphasize line clears
         weights = {
-            'lines': 10.0,      # Strong positive for line clears
-            'height': -1.0,     # Penalty for placement height (range ~1-20)
-            'holes': -0.36,     # Penalty for holes
-            'bumpiness': -0.18, # Penalty for uneven surface
+            'lines': 10.0,           # Strong positive for line clears
+            'height': -1.0,          # Penalty for placement height (range ~1-20)
+            'aggregate_height': 0.0, # Penalty for total column heights (range ~20-200)
+            'holes': -0.36,          # Penalty for holes
+            'bumpiness': -0.18,      # Penalty for uneven surface
         }
 
     # Apply rotations
@@ -157,6 +158,7 @@ def evaluate_placement(board, piece_shape, rotation, target_col, weights=None):
 
     # Calculate board metrics
     heights = get_column_heights(new_board)
+    aggregate_height = np.sum(heights)
     holes = count_holes(new_board)
     bumpiness = calculate_bumpiness(heights)
 
@@ -164,6 +166,7 @@ def evaluate_placement(board, piece_shape, rotation, target_col, weights=None):
     score = (
         weights['lines'] * lines_cleared +
         weights['height'] * placement_height +
+        weights.get('aggregate_height', 0.0) * aggregate_height +
         weights['holes'] * holes +
         weights['bumpiness'] * bumpiness
     )

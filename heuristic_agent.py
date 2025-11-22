@@ -32,12 +32,12 @@ class HeuristicAgent(BaseAgent):
             weights: Heuristic weights dict (or None for defaults)
         """
         super().__init__(n_rows, n_cols)
-        # Use original weight tuned for aggregate height
-        # Since we now use placement_height, keep the gentler -0.51 penalty
+        # Use original heuristic weights
         if weights is None:
             weights = {
                 'lines': 10.0,
-                'height': -0.51,    # Original weight (gentler than default -1.0)
+                'height': 0.0,           # Don't use placement height
+                'aggregate_height': -0.51,  # Use aggregate height instead
                 'holes': -0.36,
                 'bumpiness': -0.18,
             }
