@@ -341,7 +341,7 @@ def main():
                         help="Path to pretrained model to initialize from")
     parser.add_argument('--grad-clip', type=float, default=1.0,
                         help="Gradient clipping threshold")
-    parser.add_argument('--save-interval', type=int, default=100,
+    parser.add_argument('--save-interval', type=int, default=20,
                         help="Save model every N episodes")
 
     # Value-specific args
