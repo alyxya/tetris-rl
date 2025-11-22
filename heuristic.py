@@ -65,13 +65,14 @@ def simulate_drop(board, piece_shape, target_col):
     Returns:
         new_board: Resulting board after drop (or None if invalid)
         lines_cleared: Number of complete lines in result
+        placement_height: Height from bottom where piece was placed
     """
     n_rows, n_cols = board.shape
     piece_height, piece_width = piece_shape.shape
 
     # Check if piece fits horizontally
     if target_col + piece_width > n_cols or target_col < 0:
-        return None, 0
+        return None, 0, 0
 
     new_board = board.copy()
 
@@ -95,7 +96,7 @@ def simulate_drop(board, piece_shape, target_col):
         if collision:
             # Place at previous row
             if row == 0:
-                return None, 0  # Can't place
+                return None, 0, 0  # Can't place
 
             place_row = row - 1
             for pr in range(piece_height):
@@ -104,7 +105,8 @@ def simulate_drop(board, piece_shape, target_col):
                         new_board[place_row + pr, target_col + pc] = 1
 
             lines_cleared = count_complete_lines(new_board)
-            return new_board, lines_cleared
+            placement_height = n_rows - place_row
+            return new_board, lines_cleared, placement_height
 
     # No collision, place at bottom
     place_row = n_rows - piece_height
@@ -114,7 +116,8 @@ def simulate_drop(board, piece_shape, target_col):
                 new_board[place_row + pr, target_col + pc] = 1
 
     lines_cleared = count_complete_lines(new_board)
-    return new_board, lines_cleared
+    placement_height = n_rows - place_row
+    return new_board, lines_cleared, placement_height
 
 
 def evaluate_placement(board, piece_shape, rotation, target_col, weights=None):
@@ -136,7 +139,7 @@ def evaluate_placement(board, piece_shape, rotation, target_col, weights=None):
         # Default weights emphasize line clears
         weights = {
             'lines': 10.0,      # Strong positive for line clears
-            'height': -0.51,    # Penalty for aggregate height
+            'height': -0.51,    # Penalty for placement height
             'holes': -0.36,     # Penalty for holes
             'bumpiness': -0.18, # Penalty for uneven surface
         }
@@ -147,21 +150,20 @@ def evaluate_placement(board, piece_shape, rotation, target_col, weights=None):
         rotated_shape = rotate_piece_cw(rotated_shape)
 
     # Simulate the drop
-    new_board, lines_cleared = simulate_drop(board, rotated_shape, target_col)
+    new_board, lines_cleared, placement_height = simulate_drop(board, rotated_shape, target_col)
 
     if new_board is None:
         return float('-inf'), 0
 
     # Calculate board metrics
     heights = get_column_heights(new_board)
-    aggregate_height = np.sum(heights)
     holes = count_holes(new_board)
     bumpiness = calculate_bumpiness(heights)
 
     # Compute weighted score
     score = (
         weights['lines'] * lines_cleared +
-        weights['height'] * aggregate_height +
+        weights['height'] * placement_height +
         weights['holes'] * holes +
         weights['bumpiness'] * bumpiness
     )
