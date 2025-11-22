@@ -45,8 +45,11 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
 
     Reward structure:
     1. Large immediate reward for line clears (if they happened)
-    2. Otherwise, normalize action-specific heuristic scores (mean 0, std 0.01)
-       based on placements across identity and single-rotation orientations.
+    2. Otherwise:
+       - HARD_DROP: score from dropping at current position/rotation
+       - NO_OP/SOFT_DROP: 0.0 reward
+       - LEFT/RIGHT/ROTATE: weighted average of all placement scores,
+         weighted by the proportion of that action needed to reach each placement
 
     Returns:
         rewards_by_action: np.ndarray of shape (7,) with rewards for each action
@@ -77,9 +80,10 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
         return rewards, lines_cleared
 
     # Otherwise, compute action-based heuristic scores
-    # Get current piece position
+    # Get current piece position (assume rotation 0 since we can't easily infer it)
     piece_positions = np.argwhere(active_piece > 0)
     current_left_col = piece_positions[:, 1].min()
+    current_rotation = 0  # Assumption: current piece is at rotation 0
 
     # Evaluate placements for all rotations (0-3)
     n_cols = locked_board.shape[1]
@@ -105,77 +109,83 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
     if len(placements) == 0:
         return np.zeros(7, dtype=np.float32), 0
 
-    scores = np.array([p[2] for p in placements])
-    cols = np.array([p[1] for p in placements])
-    rotations = np.array([p[0] for p in placements])
+    # Apply softmax to all placement scores for normalization
+    scores = np.array([p[2] for p in placements], dtype=np.float32)
+    # Subtract max for numerical stability
+    scores_shifted = scores - np.max(scores)
+    exp_scores = np.exp(scores_shifted)
+    softmax_scores = exp_scores / np.sum(exp_scores)
 
-    # Filter to only non-rotated pieces (rotation 0) for NO_OP and SOFT_DROP
-    nonrotated_mask = rotations == 0
-    nonrotated_scores = scores[nonrotated_mask]
-    nonrotated_cols = cols[nonrotated_mask]
+    # Create normalized placements list
+    normalized_placements = [(placements[i][0], placements[i][1], softmax_scores[i])
+                             for i in range(len(placements))]
 
-    # NO_OP: Weighted average skewed towards current column
-    if len(nonrotated_scores) > 0:
-        # Weight inversely proportional to distance from current column
-        distances = np.abs(nonrotated_cols - current_left_col)
-        # Use moderate exponential decay: weight = exp(-distance)
-        weights_no_op = np.exp(-distances.astype(float))
-        weights_no_op /= np.sum(weights_no_op)  # Normalize
-        no_op_score = float(np.sum(weights_no_op * nonrotated_scores))
-    else:
-        no_op_score = 0.0
-
-    # SOFT_DROP: Score at current column position
-    current_col_mask = nonrotated_cols == current_left_col
-    if current_col_mask.any():
-        soft_drop_score = float(nonrotated_scores[current_col_mask][0])
-    else:
-        soft_drop_score = None
-
-    # LEFT: Only consider non-rotated placements to the left
-    left_mask = (cols < current_left_col) & (rotations == 0)
-    mean_left = float(np.mean(scores[left_mask])) if left_mask.any() else None
-
-    # RIGHT: Only consider non-rotated placements to the right
-    right_mask = (cols > current_left_col) & (rotations == 0)
-    mean_right = float(np.mean(scores[right_mask])) if right_mask.any() else None
-
-    # ROTATE: Only consider rotated placements (rotations 1-3)
-    rotation_mask = rotations > 0
-    mean_rotation = float(np.mean(scores[rotation_mask])) if rotation_mask.any() else None
-
-    raw_scores = {
-        ACTION_NO_OP: no_op_score,
-        ACTION_LEFT: mean_left,
-        ACTION_RIGHT: mean_right,
-        ACTION_ROTATE: mean_rotation,
-        ACTION_SOFT_DROP: soft_drop_score,
-    }
-
-    # Only use non-None values for normalization
-    valid_scores = {k: v for k, v in raw_scores.items() if v is not None}
-    raw_values = np.array(list(valid_scores.values()), dtype=np.float32)
-    raw_mean = float(raw_values.mean())
-    raw_std = float(raw_values.std())
-    if raw_std == 0.0:
-        raw_std = 1.0
-
-    normalized = (raw_values - raw_mean) / raw_std
-    target_std = 0.01
-    target_mean = 0.001
-    normalized = normalized * target_std + target_mean
-
-    # Map normalized values back to actions
-    normalized_dict = {}
-    for idx, act in enumerate(valid_scores.keys()):
-        normalized_dict[act] = float(normalized[idx])
-
-    # Assign rewards: use normalized value if available, otherwise use 0.0
+    # Initialize rewards
     rewards_by_action = np.zeros(7, dtype=np.float32)
-    for act in raw_scores.keys():
-        if act in normalized_dict:
-            rewards_by_action[act] = normalized_dict[act]
-        # else: remains 0.0 from initialization
+
+    # NO_OP and SOFT_DROP: 0.0 reward
+    rewards_by_action[ACTION_NO_OP] = 0.0
+    rewards_by_action[ACTION_SOFT_DROP] = 0.0
+
+    # HARD_DROP: softmax-normalized score at current position and rotation
+    hard_drop_placements = [(r, c, s) for r, c, s in normalized_placements
+                           if r == current_rotation and c == current_left_col]
+    if hard_drop_placements:
+        rewards_by_action[ACTION_HARD_DROP] = float(hard_drop_placements[0][2])
+    else:
+        rewards_by_action[ACTION_HARD_DROP] = 0.0
+
+    # LEFT, RIGHT, ROTATE: weighted average based on action counts
+    # For each placement, calculate the number of each action needed
+    left_weighted_sum = 0.0
+    left_total_weight = 0.0
+    right_weighted_sum = 0.0
+    right_total_weight = 0.0
+    rotate_weighted_sum = 0.0
+    rotate_total_weight = 0.0
+
+    for rotation, col, norm_score in normalized_placements:
+        # Calculate actions needed from current position
+        num_rotates = rotation - current_rotation
+        if num_rotates < 0:
+            num_rotates += 4  # Wrap around
+
+        num_horizontal = col - current_left_col
+        num_left = max(0, -num_horizontal)
+        num_right = max(0, num_horizontal)
+
+        total_actions = num_left + num_right + num_rotates
+        if total_actions == 0:
+            continue  # This is the current position, skip
+
+        # Weight for each action type is its proportion of total actions
+        if num_left > 0:
+            weight = num_left / total_actions
+            left_weighted_sum += weight * norm_score
+            left_total_weight += weight
+
+        if num_right > 0:
+            weight = num_right / total_actions
+            right_weighted_sum += weight * norm_score
+            right_total_weight += weight
+
+        if num_rotates > 0:
+            weight = num_rotates / total_actions
+            rotate_weighted_sum += weight * norm_score
+            rotate_total_weight += weight
+
+    # Compute weighted averages
+    if left_total_weight > 0:
+        rewards_by_action[ACTION_LEFT] = left_weighted_sum / left_total_weight
+
+    if right_total_weight > 0:
+        rewards_by_action[ACTION_RIGHT] = right_weighted_sum / right_total_weight
+
+    if rotate_total_weight > 0:
+        rewards_by_action[ACTION_ROTATE] = rotate_weighted_sum / rotate_total_weight
+
+    # HOLD action: always 0.0
+    rewards_by_action[ACTION_HOLD] = 0.0
 
     return rewards_by_action, 0
 
