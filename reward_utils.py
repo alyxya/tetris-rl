@@ -111,9 +111,10 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
 
     # Apply softmax to all placement scores for normalization
     scores = np.array([p[2] for p in placements], dtype=np.float32)
-    # Subtract max for numerical stability
+    # Subtract max for numerical stability, then apply temperature
+    temperature = 0.1
     scores_shifted = scores - np.max(scores)
-    exp_scores = np.exp(scores_shifted)
+    exp_scores = np.exp(scores_shifted / temperature)
     softmax_scores = exp_scores / np.sum(exp_scores)
 
     # Create normalized placements list
