@@ -133,16 +133,16 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
         weights_soft_drop /= np.sum(weights_soft_drop)  # Normalize
         soft_drop_score = float(np.sum(weights_soft_drop * nonrotated_scores))
     else:
-        soft_drop_score = 0.0
+        soft_drop_score = None
 
     left_mask = cols < current_left_col
-    mean_left = float(np.mean(scores[left_mask])) if left_mask.any() else 0.0
+    mean_left = float(np.mean(scores[left_mask])) if left_mask.any() else None
 
     right_mask = cols > current_left_col
-    mean_right = float(np.mean(scores[right_mask])) if right_mask.any() else 0.0
+    mean_right = float(np.mean(scores[right_mask])) if right_mask.any() else None
 
     rotation_mask = rotations > 0
-    mean_rotation = float(np.mean(scores[rotation_mask])) if rotation_mask.any() else 0.0
+    mean_rotation = float(np.mean(scores[rotation_mask])) if rotation_mask.any() else None
 
     raw_scores = {
         ACTION_NO_OP: no_op_score,
@@ -152,7 +152,9 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
         ACTION_SOFT_DROP: soft_drop_score,
     }
 
-    raw_values = np.array(list(raw_scores.values()), dtype=np.float32)
+    # Only use non-None values for normalization
+    valid_scores = {k: v for k, v in raw_scores.items() if v is not None}
+    raw_values = np.array(list(valid_scores.values()), dtype=np.float32)
     raw_mean = float(raw_values.mean())
     raw_std = float(raw_values.std())
     if raw_std == 0.0:
@@ -163,9 +165,19 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
     target_mean = 0.001
     normalized = normalized * target_std + target_mean
 
+    # Map normalized values back to actions
+    normalized_dict = {}
+    for idx, act in enumerate(valid_scores.keys()):
+        normalized_dict[act] = float(normalized[idx])
+
+    # Assign rewards: use normalized value if available, otherwise use NO_OP's reward
     rewards_by_action = np.zeros(7, dtype=np.float32)
-    for idx, act in enumerate(raw_scores.keys()):
-        rewards_by_action[act] = float(normalized[idx])
+    no_op_reward = normalized_dict.get(ACTION_NO_OP, 0.0)
+    for act in raw_scores.keys():
+        if act in normalized_dict:
+            rewards_by_action[act] = normalized_dict[act]
+        else:
+            rewards_by_action[act] = no_op_reward
 
     return rewards_by_action, 0
 
