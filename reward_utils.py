@@ -187,6 +187,28 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
     # HOLD action: always 0.0
     rewards_by_action[ACTION_HOLD] = 0.0
 
+    # Apply mean/std normalization to scale rewards
+    # Collect non-zero rewards for normalization (exclude NO_OP, SOFT_DROP, HOLD which are 0.0)
+    non_zero_actions = [ACTION_LEFT, ACTION_RIGHT, ACTION_ROTATE, ACTION_HARD_DROP]
+    non_zero_rewards = [rewards_by_action[a] for a in non_zero_actions if rewards_by_action[a] != 0.0]
+
+    if len(non_zero_rewards) > 0:
+        rewards_array = np.array(non_zero_rewards, dtype=np.float32)
+        reward_mean = float(rewards_array.mean())
+        reward_std = float(rewards_array.std())
+
+        if reward_std == 0.0:
+            reward_std = 1.0
+
+        # Normalize to mean=0, std=1, then rescale to target mean and std
+        target_std = 0.01
+        target_mean = 0.001
+
+        for action in non_zero_actions:
+            if rewards_by_action[action] != 0.0:
+                normalized = (rewards_by_action[action] - reward_mean) / reward_std
+                rewards_by_action[action] = normalized * target_std + target_mean
+
     return rewards_by_action, 0
 
 
