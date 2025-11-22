@@ -81,9 +81,9 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
     piece_positions = np.argwhere(active_piece > 0)
     current_left_col = piece_positions[:, 1].min()
 
-    # Evaluate placements for identity and single clockwise rotation only
+    # Evaluate placements for all rotations (0-3)
     n_cols = locked_board.shape[1]
-    rotations_to_consider = (0, 1)
+    rotations_to_consider = (0, 1, 2, 3)
     placements = []  # List of (rotation, col, score)
 
     for rotation in rotations_to_consider:
@@ -132,12 +132,15 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
     else:
         soft_drop_score = None
 
-    left_mask = cols < current_left_col
+    # LEFT: Only consider non-rotated placements to the left
+    left_mask = (cols < current_left_col) & (rotations == 0)
     mean_left = float(np.mean(scores[left_mask])) if left_mask.any() else None
 
-    right_mask = cols > current_left_col
+    # RIGHT: Only consider non-rotated placements to the right
+    right_mask = (cols > current_left_col) & (rotations == 0)
     mean_right = float(np.mean(scores[right_mask])) if right_mask.any() else None
 
+    # ROTATE: Only consider rotated placements (rotations 1-3)
     rotation_mask = rotations > 0
     mean_rotation = float(np.mean(scores[rotation_mask])) if rotation_mask.any() else None
 
