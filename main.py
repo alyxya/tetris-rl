@@ -201,6 +201,9 @@ def main():
         if args.episodes > 1:
             print(f"\n=== Episode {episode + 1}/{args.episodes} ===")
 
+        # Calculate seed for this episode
+        episode_seed = args.seed + episode
+
         # Special handling for policy agent parameters
         if args.agent == 'policy':
             original_choose = agent.choose_action
@@ -217,7 +220,7 @@ def main():
                 return original_choose(obs, epsilon=args.epsilon)
             agent.choose_action = choose_action_wrapper
 
-        steps = run_episode(env, agent, render=args.render, verbose=args.verbose, show_rewards=args.show_rewards, seed=args.seed)
+        steps = run_episode(env, agent, render=args.render, verbose=args.verbose, show_rewards=args.show_rewards, seed=episode_seed)
 
         # Restore original methods
         if args.agent in ['policy', 'value']:
