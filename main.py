@@ -19,7 +19,7 @@ from hybrid_agent import HybridAgent
 from reward_utils import compute_all_heuristic_rewards, ACTION_NAMES
 
 
-def run_episode(env, agent, render=False, verbose=True, show_rewards=False):
+def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed=None):
     """
     Run a single episode with the given agent.
 
@@ -29,11 +29,14 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False):
         render: Whether to render the game
         verbose: Whether to print progress
         show_rewards: Whether to show heuristic rewards for each action
+        seed: Random seed for environment reset
 
     Returns:
         steps: Number of steps taken
     """
-    obs, _ = env.reset(seed=int(time.time() * 1e6))
+    if seed is None:
+        seed = int(time.time() * 1e6)
+    obs, _ = env.reset(seed=seed)
     agent.reset()
 
     done = False
@@ -97,6 +100,8 @@ def main():
                         help='Device for neural networks (cpu or cuda)')
     parser.add_argument('--show-rewards', action='store_true',
                         help='Show heuristic reward values for all actions at each step')
+    parser.add_argument('--seed', type=int, default=None,
+                        help='Random seed for reproducibility')
 
     # Policy agent options
     parser.add_argument('--deterministic', action='store_true',
@@ -119,6 +124,12 @@ def main():
                         help='Model path for value agent in hybrid')
 
     args = parser.parse_args()
+
+    # Generate seed if not provided
+    if args.seed is None:
+        args.seed = int(time.time() * 1e6)
+
+    print(f"Using seed: {args.seed}")
 
     # Create environment (seed passed to reset())
     env = tetris.Tetris()
@@ -206,7 +217,7 @@ def main():
                 return original_choose(obs, epsilon=args.epsilon)
             agent.choose_action = choose_action_wrapper
 
-        steps = run_episode(env, agent, render=args.render, verbose=args.verbose, show_rewards=args.show_rewards)
+        steps = run_episode(env, agent, render=args.render, verbose=args.verbose, show_rewards=args.show_rewards, seed=args.seed)
 
         # Restore original methods
         if args.agent in ['policy', 'value']:
