@@ -32,6 +32,15 @@ class HeuristicAgent(BaseAgent):
             weights: Heuristic weights dict (or None for defaults)
         """
         super().__init__(n_rows, n_cols)
+        # Use original weight tuned for aggregate height
+        # Since we now use placement_height, keep the gentler -0.51 penalty
+        if weights is None:
+            weights = {
+                'lines': 10.0,
+                'height': -0.51,    # Original weight (gentler than default -1.0)
+                'holes': -0.36,
+                'bumpiness': -0.18,
+            }
         self.weights = weights
 
         # State tracking for multi-step plans
@@ -65,10 +74,6 @@ class HeuristicAgent(BaseAgent):
             self.current_rotations = 0
             return ACTION_NOOP
 
-        # Get current piece position
-        piece_positions = np.argwhere(active_piece > 0)
-        current_left_col = piece_positions[:, 1].min()
-
         # Find best placement if we don't have a target
         if self.target_column is None or self.target_rotation is None:
             self.target_rotation, self.target_column, _ = heuristic.find_best_placement(
@@ -86,6 +91,10 @@ class HeuristicAgent(BaseAgent):
             return ACTION_ROTATE
 
         # Step 2: Move to target column
+        # Only calculate current position after rotation is complete
+        piece_positions = np.argwhere(active_piece > 0)
+        current_left_col = piece_positions[:, 1].min()
+
         if current_left_col > self.target_column:
             return ACTION_LEFT
         elif current_left_col < self.target_column:
