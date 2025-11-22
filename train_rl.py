@@ -329,7 +329,7 @@ def main():
                         help="Training mode: 'value' or 'policy'")
     parser.add_argument('--num-episodes', type=int, default=1000,
                         help="Number of episodes to train")
-    parser.add_argument('--lr', type=float, default=1e-4,
+    parser.add_argument('--lr', type=float, default=3e-4,
                         help="Learning rate")
     parser.add_argument('--gamma', type=float, default=0.99,
                         help="Discount factor")
@@ -347,13 +347,13 @@ def main():
     # Value-specific args
     parser.add_argument('--buffer-size', type=int, default=10000,
                         help="Replay buffer size (value mode)")
-    parser.add_argument('--batch-size', type=int, default=64,
+    parser.add_argument('--batch-size', type=int, default=256,
                         help="Batch size (value mode)")
     parser.add_argument('--epsilon-start', type=float, default=0.2,
                         help="Initial epsilon (value mode)")
     parser.add_argument('--epsilon-end', type=float, default=0.01,
                         help="Final epsilon (value mode)")
-    parser.add_argument('--target-update', type=int, default=10,
+    parser.add_argument('--target-update', type=int, default=2,
                         help="Target network update frequency (value mode)")
 
     # Policy-specific args
