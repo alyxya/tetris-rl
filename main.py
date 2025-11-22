@@ -117,8 +117,8 @@ def main():
     # Policy agent options
     parser.add_argument('--deterministic', action='store_true',
                         help='Use deterministic policy (argmax) instead of sampling')
-    parser.add_argument('--temperature', type=float, default=1.0,
-                        help='Sampling temperature for policy agent')
+    parser.add_argument('--temperature', type=float, default=None,
+                        help='Sampling temperature for policy/value agents (default: 1.0 for policy, 0.0 for value)')
 
     # Value agent options
     parser.add_argument('--epsilon', type=float, default=0.0,
@@ -218,17 +218,19 @@ def main():
         # Special handling for policy agent parameters
         if args.agent == 'policy':
             original_choose = agent.choose_action
+            temp = args.temperature if args.temperature is not None else 1.0
             def choose_action_wrapper(obs):
                 return original_choose(obs,
                                       deterministic=args.deterministic,
-                                      temperature=args.temperature)
+                                      temperature=temp)
             agent.choose_action = choose_action_wrapper
 
         # Special handling for value agent parameters
         if args.agent == 'value':
             original_choose = agent.choose_action
+            temp = args.temperature if args.temperature is not None else 0.0
             def choose_action_wrapper(obs):
-                return original_choose(obs, epsilon=args.epsilon)
+                return original_choose(obs, epsilon=args.epsilon, temperature=temp)
             agent.choose_action = choose_action_wrapper
 
         steps = run_episode(env, agent, render=args.render, verbose=args.verbose, show_rewards=args.show_rewards, seed=episode_seed)
