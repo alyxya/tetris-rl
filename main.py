@@ -61,14 +61,25 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed
 
             rewards, lines_cleared = compute_all_heuristic_rewards(locked, active, next_locked)
 
+            # Get Q-values if this is a value agent
+            q_values = None
+            if hasattr(agent, 'get_q_values'):
+                q_values = agent.get_q_values(obs_single)
+
             if lines_cleared > 0:
                 print(f"\n  Step {steps}: Action={ACTION_NAMES[action]} (Lines cleared: {lines_cleared}, reward={rewards[action]:.4f})")
             else:
                 print(f"\n  Step {steps}: Action={ACTION_NAMES[action]}")
-                print(f"    Rewards by action:")
-                for act in range(7):
-                    marker = " <--" if act == action else ""
-                    print(f"      {ACTION_NAMES[act]:>10s}: {rewards[act]:+.6f}{marker}")
+                if q_values is not None:
+                    print(f"    Rewards by action:                Values by action:")
+                    for act in range(7):
+                        marker = " <--" if act == action else ""
+                        print(f"      {ACTION_NAMES[act]:>10s}: {rewards[act]:+.6f}{marker}    {ACTION_NAMES[act]:>10s}: {q_values[act]:+.6f}{marker}")
+                else:
+                    print(f"    Rewards by action:")
+                    for act in range(7):
+                        marker = " <--" if act == action else ""
+                        print(f"      {ACTION_NAMES[act]:>10s}: {rewards[act]:+.6f}{marker}")
 
         if render:
             env.render()
