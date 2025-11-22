@@ -175,13 +175,18 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
             rotate_total_weight += weight
 
     # Compute weighted averages
-    if left_total_weight > 0:
+    # Track which actions have valid scores
+    left_has_score = left_total_weight > 0
+    right_has_score = right_total_weight > 0
+    rotate_has_score = rotate_total_weight > 0
+
+    if left_has_score:
         rewards_by_action[ACTION_LEFT] = left_weighted_sum / left_total_weight
 
-    if right_total_weight > 0:
+    if right_has_score:
         rewards_by_action[ACTION_RIGHT] = right_weighted_sum / right_total_weight
 
-    if rotate_total_weight > 0:
+    if rotate_has_score:
         rewards_by_action[ACTION_ROTATE] = rotate_weighted_sum / rotate_total_weight
 
     # HOLD action: always 0.0
@@ -208,6 +213,14 @@ def compute_all_heuristic_rewards(locked_board, active_piece, next_locked_board)
             if rewards_by_action[action] != 0.0:
                 normalized = (rewards_by_action[action] - reward_mean) / reward_std
                 rewards_by_action[action] = normalized * target_std + target_mean
+
+    # Assign -0.01 to actions that had no valid placements
+    if not left_has_score:
+        rewards_by_action[ACTION_LEFT] = -0.01
+    if not right_has_score:
+        rewards_by_action[ACTION_RIGHT] = -0.01
+    if not rotate_has_score:
+        rewards_by_action[ACTION_ROTATE] = -0.01
 
     return rewards_by_action, 0
 
