@@ -139,7 +139,7 @@ def evaluate_placement(board, piece_shape, rotation, target_col, weights=None):
         # Default weights emphasize line clears
         weights = {
             'lines': 10.0,      # Strong positive for line clears
-            'height': -0.51,    # Penalty for placement height
+            'height': -1.0,     # Penalty for placement height (range ~1-20)
             'holes': -0.36,     # Penalty for holes
             'bumpiness': -0.18, # Penalty for uneven surface
         }
