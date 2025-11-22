@@ -33,13 +33,14 @@ class ValueAgent(BaseAgent):
         if model_path is not None:
             self.load_model(model_path)
 
-    def choose_action(self, obs, epsilon=0.0):
+    def choose_action(self, obs, epsilon=0.0, temperature=0.1):
         """
-        Choose action with epsilon-greedy selection.
+        Choose action with epsilon-greedy and Boltzmann exploration.
 
         Args:
             obs: Flattened observation
             epsilon: Probability of random exploration
+            temperature: Temperature for Boltzmann sampling (0 = greedy, higher = more exploration)
 
         Returns:
             action: Selected action (0-6)
@@ -48,9 +49,21 @@ class ValueAgent(BaseAgent):
         if np.random.random() < epsilon:
             return np.random.randint(0, 7)
 
-        # Greedy action selection
+        # Get Q-values
         q_values = self.get_q_values(obs)
-        return int(np.argmax(q_values))
+
+        # Temperature = 0 means greedy action selection
+        if temperature == 0.0:
+            return int(np.argmax(q_values))
+
+        # Boltzmann (softmax) action selection with temperature
+        # Shift Q-values for numerical stability
+        q_shifted = q_values - np.max(q_values)
+        exp_q = np.exp(q_shifted / temperature)
+        probs = exp_q / np.sum(exp_q)
+
+        action = np.random.choice(len(probs), p=probs)
+        return int(action)
 
     def get_q_values(self, obs):
         """
