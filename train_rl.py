@@ -115,8 +115,9 @@ def train_value_rl(args):
             board_filled = locked.copy()
             board_filled[active > 0] = 1.0
 
-            # Epsilon-greedy action selection
-            action = agent.choose_action(obs_single, epsilon=epsilon)
+            # Epsilon-greedy action selection with temperature
+            temperature = args.temperature if args.temperature is not None else 0.0
+            action = agent.choose_action(obs_single, epsilon=epsilon, temperature=temperature)
 
             # Take step
             next_obs, _, terminated, truncated, _ = env.step([action])
@@ -252,7 +253,8 @@ def train_policy_rl(args):
             states_filled.append(board_filled)
 
             # Sample action
-            action = agent.choose_action(obs_single, deterministic=False, temperature=args.temperature)
+            temperature = args.temperature if args.temperature is not None else 1.0
+            action = agent.choose_action(obs_single, deterministic=False, temperature=temperature)
             actions.append(action)
 
             # Take step
@@ -357,8 +359,8 @@ def main():
                         help="Target network update frequency (value mode)")
 
     # Policy-specific args
-    parser.add_argument('--temperature', type=float, default=1.0,
-                        help="Sampling temperature (policy mode)")
+    parser.add_argument('--temperature', type=float, default=None,
+                        help="Sampling temperature (default: 1.0 for policy, 0.0 for value)")
 
     args = parser.parse_args()
 
