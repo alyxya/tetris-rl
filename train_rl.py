@@ -1,9 +1,8 @@
 """
 Reinforcement learning for Tetris agents.
 
-Two training modes:
-1. Value network: Q-learning with heuristic rewards
-2. Policy network: REINFORCE with heuristic auxiliary rewards
+Training mode:
+- Value network: Q-learning with heuristic rewards
 """
 
 import argparse
@@ -18,9 +17,8 @@ import time
 import os
 from pufferlib.ocean.tetris import tetris
 
-from model import PolicyNetwork, ValueNetwork
+from model import ValueNetwork
 from value_agent import ValueAgent
-from policy_agent import PolicyAgent
 from reward_utils import compute_all_heuristic_rewards, compute_heuristic_reward
 
 
@@ -204,131 +202,8 @@ def train_value_rl(args):
     print(f"\nTraining complete! Final model saved to {args.output}")
 
 
-def train_policy_rl(args):
-    """Train policy network with REINFORCE."""
-    print("Training Policy Network with REINFORCE")
-    print("=" * 50)
-
-    device = torch.device(args.device)
-    env = tetris.Tetris()
-
-    # Create model
-    model = PolicyNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
-
-    # Load pretrained weights if provided
-    if args.init_model:
-        checkpoint = torch.load(args.init_model, map_location=device, weights_only=False)
-        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
-        else:
-            model.load_state_dict(checkpoint)
-        print(f"Loaded initial weights from {args.init_model}")
-
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-
-    agent = PolicyAgent(device=args.device)
-    agent.model = model
-
-    for episode in tqdm(range(args.num_episodes), desc="Training"):
-        obs, _ = env.reset(seed=int(time.time() * 1e6))
-        done = False
-
-        states_empty = []
-        states_filled = []
-        actions = []
-        rewards = []
-
-        # Collect episode
-        while not done:
-            # Extract single observation from batch
-            obs_single = obs[0] if len(obs.shape) > 1 else obs
-
-            # Parse state
-            _, locked, active = agent.parse_observation(obs_single)
-            board_empty = locked.copy()
-            board_filled = locked.copy()
-            board_filled[active > 0] = 1.0
-
-            states_empty.append(board_empty)
-            states_filled.append(board_filled)
-
-            # Sample action
-            temperature = args.temperature if args.temperature is not None else 1.0
-            action = agent.choose_action(obs_single, deterministic=False, temperature=temperature)
-            actions.append(action)
-
-            # Take step
-            next_obs, _, terminated, truncated, _ = env.step([action])
-            done = terminated[0] or truncated[0]
-
-            # Parse next state
-            next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
-            _, next_locked, _ = agent.parse_observation(next_obs_single)
-
-            # Compute action-conditioned heuristic reward (line clears + normalized heuristic score)
-            if done:
-                reward = -0.1  # Death penalty
-            else:
-                reward = compute_heuristic_reward(locked, active, next_locked, action)
-            rewards.append(reward)
-
-            obs = next_obs
-
-        # Compute returns
-        returns = []
-        R = 0
-        for r in reversed(rewards):
-            R = r + args.gamma * R
-            returns.insert(0, R)
-
-        # Convert to tensors
-        states_empty = torch.FloatTensor(np.array(states_empty)).unsqueeze(1).to(device)
-        states_filled = torch.FloatTensor(np.array(states_filled)).unsqueeze(1).to(device)
-        actions = torch.LongTensor(actions).to(device)
-        returns = torch.FloatTensor(returns).to(device)
-
-        # Normalize returns
-        if len(returns) > 1:
-            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
-
-        # Compute policy loss
-        logits = model(states_empty, states_filled)
-        log_probs = F.log_softmax(logits, dim=1)
-        action_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
-        policy_loss = -(action_log_probs * returns).mean()
-
-        # Backward pass
-        optimizer.zero_grad()
-        policy_loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-        optimizer.step()
-
-        total_reward = sum(rewards)
-
-        # Logging
-        if episode % 10 == 0:
-            print(f"\nEpisode {episode} - Steps: {len(rewards)}, Reward: {total_reward:.2f}")
-
-        # Save model at regular intervals
-        if episode % args.save_interval == 0 and episode > 0:
-            output_dir = os.path.dirname(args.output)
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
-            torch.save(model.state_dict(), args.output)
-            print(f"Saved model at episode {episode}")
-
-    # Save final model
-    output_dir = os.path.dirname(args.output)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-    torch.save(model.state_dict(), args.output)
-    print(f"\nTraining complete! Final model saved to {args.output}")
-
-
 def main():
     parser = argparse.ArgumentParser(description="RL training for Tetris")
-    parser.add_argument('--mode', type=str, required=True, choices=['value', 'policy'],
-                        help="Training mode: 'value' or 'policy'")
     parser.add_argument('--num-episodes', type=int, default=1000,
                         help="Number of episodes to train")
     parser.add_argument('--lr', type=float, default=1e-4,
@@ -357,17 +232,12 @@ def main():
                         help="Final epsilon (value mode)")
     parser.add_argument('--target-update', type=int, default=2,
                         help="Target network update frequency (value mode)")
-
-    # Policy-specific args
     parser.add_argument('--temperature', type=float, default=None,
-                        help="Sampling temperature (default: 1.0 for policy, 0.0 for value)")
+                        help="Sampling temperature (default: 0.0 for value)")
 
     args = parser.parse_args()
 
-    if args.mode == 'value':
-        train_value_rl(args)
-    else:
-        train_policy_rl(args)
+    train_value_rl(args)
 
 
 if __name__ == '__main__':

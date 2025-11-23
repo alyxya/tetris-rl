@@ -3,7 +3,6 @@ Neural network architectures for Tetris.
 
 Contains:
 - Shared CNN backbone for processing dual-board representation
-- PolicyNetwork: outputs action logits for sampling
 - ValueNetwork: outputs Q-values for each action
 """
 
@@ -37,45 +36,6 @@ class SharedCNN(nn.Module):
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         return x.view(x.size(0), -1)
-
-
-class PolicyNetwork(nn.Module):
-    """Policy network that outputs action logits for sampling."""
-
-    def __init__(self, n_rows=20, n_cols=10, n_actions=7):
-        super().__init__()
-
-        self.n_actions = n_actions
-        self.cnn = SharedCNN(n_rows, n_cols)
-
-        # MLP head for dual board features -> action logits
-        feature_size = self.cnn.output_size * 2  # Concatenate empty + filled
-        self.fc1 = nn.Linear(feature_size, 256)
-        self.fc2 = nn.Linear(256, 128)
-        self.fc3 = nn.Linear(128, n_actions)
-
-        self.dropout = nn.Dropout(0.3)
-
-    def forward(self, board_empty, board_filled):
-        """Forward pass with dual board representation.
-
-        Args:
-            board_empty: Board with locked pieces only (Bx1x20x10)
-            board_filled: Board with locked + active piece (Bx1x20x10)
-
-        Returns:
-            logits: Action logits (Bx7)
-        """
-        features_empty = self.cnn(board_empty)
-        features_filled = self.cnn(board_filled)
-        features = torch.cat([features_empty, features_filled], dim=1)
-
-        x = F.relu(self.fc1(features))
-        x = self.dropout(x)
-        x = F.relu(self.fc2(x))
-        x = self.dropout(x)
-        logits = self.fc3(x)
-        return logits
 
 
 class ValueNetwork(nn.Module):

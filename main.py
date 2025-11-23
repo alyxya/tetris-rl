@@ -3,9 +3,8 @@ Main script for running Tetris agents.
 
 Usage examples:
     python main.py --agent heuristic [--episodes 1] [--render]
-    python main.py --agent policy --model-path models/policy.pt [--episodes 1]
     python main.py --agent value --model-path models/value.pt [--episodes 1]
-    python main.py --agent hybrid --agents heuristic,policy --probs 0.5,0.5 [--episodes 1]
+    python main.py --agent hybrid --agents heuristic,value --probs 0.5,0.5 [--episodes 1]
 """
 
 import argparse
@@ -13,7 +12,6 @@ import time
 import numpy as np
 from pufferlib.ocean.tetris import tetris
 from heuristic_agent import HeuristicAgent
-from policy_agent import PolicyAgent
 from value_agent import ValueAgent
 from hybrid_agent import HybridAgent
 from reward_utils import compute_all_heuristic_rewards, ACTION_NAMES
@@ -97,10 +95,10 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Run Tetris agents')
     parser.add_argument('--agent', type=str, required=True,
-                        choices=['heuristic', 'policy', 'value', 'hybrid'],
+                        choices=['heuristic', 'value', 'hybrid'],
                         help='Agent type to use')
     parser.add_argument('--model-path', type=str, default=None,
-                        help='Path to model weights (for policy/value agents)')
+                        help='Path to model weights (for value agent)')
     parser.add_argument('--episodes', type=int, default=1,
                         help='Number of episodes to run')
     parser.add_argument('--render', action='store_true',
@@ -114,23 +112,17 @@ def main():
     parser.add_argument('--seed', type=int, default=None,
                         help='Random seed for reproducibility')
 
-    # Policy agent options
-    parser.add_argument('--deterministic', action='store_true',
-                        help='Use deterministic policy (argmax) instead of sampling')
-    parser.add_argument('--temperature', type=float, default=None,
-                        help='Sampling temperature for policy/value agents (default: 1.0 for policy, 0.0 for value)')
-
     # Value agent options
+    parser.add_argument('--temperature', type=float, default=None,
+                        help='Sampling temperature for value agent (default: 0.0)')
     parser.add_argument('--epsilon', type=float, default=0.0,
                         help='Exploration epsilon for value agent')
 
     # Hybrid agent options
     parser.add_argument('--agents', type=str, default=None,
-                        help='Comma-separated list of agents for hybrid (e.g., heuristic,policy,random)')
+                        help='Comma-separated list of agents for hybrid (e.g., heuristic,value,random)')
     parser.add_argument('--probs', type=str, default=None,
                         help='Comma-separated probabilities for hybrid agents (must sum to 1.0)')
-    parser.add_argument('--policy-model', type=str, default=None,
-                        help='Model path for policy agent in hybrid')
     parser.add_argument('--value-model', type=str, default=None,
                         help='Model path for value agent in hybrid')
 
@@ -149,14 +141,6 @@ def main():
     if args.agent == 'heuristic':
         agent = HeuristicAgent()
         print(f"Running HeuristicAgent for {args.episodes} episode(s)...")
-
-    elif args.agent == 'policy':
-        if not args.model_path:
-            print("Warning: No model path provided, using randomly initialized model")
-        agent = PolicyAgent(device=args.device, model_path=args.model_path)
-        print(f"Running PolicyAgent for {args.episodes} episode(s)...")
-        if args.model_path:
-            print(f"Loaded model from {args.model_path}")
 
     elif args.agent == 'value':
         if not args.model_path:
@@ -184,11 +168,6 @@ def main():
                 sub_agents.append('random')
             elif name == 'heuristic':
                 sub_agents.append(HeuristicAgent())
-            elif name == 'policy':
-                model_path = args.policy_model or args.model_path
-                if not model_path:
-                    print("Warning: No model path for policy agent in hybrid")
-                sub_agents.append(PolicyAgent(device=args.device, model_path=model_path))
             elif name == 'value':
                 model_path = args.value_model or args.model_path
                 if not model_path:
@@ -215,16 +194,6 @@ def main():
         # Calculate seed for this episode
         episode_seed = args.seed + episode
 
-        # Special handling for policy agent parameters
-        if args.agent == 'policy':
-            original_choose = agent.choose_action
-            temp = args.temperature if args.temperature is not None else 1.0
-            def choose_action_wrapper(obs):
-                return original_choose(obs,
-                                      deterministic=args.deterministic,
-                                      temperature=temp)
-            agent.choose_action = choose_action_wrapper
-
         # Special handling for value agent parameters
         if args.agent == 'value':
             original_choose = agent.choose_action
@@ -236,7 +205,7 @@ def main():
         steps = run_episode(env, agent, render=args.render, verbose=args.verbose, show_rewards=args.show_rewards, seed=episode_seed)
 
         # Restore original methods
-        if args.agent in ['policy', 'value']:
+        if args.agent == 'value':
             agent.choose_action = original_choose
 
         all_steps.append(steps)

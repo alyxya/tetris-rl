@@ -1,9 +1,8 @@
 """
 Supervised learning for Tetris agents.
 
-Two training modes:
-1. Value network: Learn Q-values from heuristic-based rewards via rollouts
-2. Policy network: Learn to imitate teacher agent decisions
+Training mode:
+- Value network: Learn Q-values from heuristic-based rewards via rollouts
 """
 
 import argparse
@@ -16,10 +15,9 @@ import time
 import os
 from pufferlib.ocean.tetris import tetris
 
-from model import PolicyNetwork, ValueNetwork
+from model import ValueNetwork
 from heuristic_agent import HeuristicAgent
 from value_agent import ValueAgent
-from policy_agent import PolicyAgent
 import heuristic as heuristic_module
 
 
@@ -93,43 +91,6 @@ def collect_value_rollouts(agent, env, num_episodes, gamma=0.99):
     q_targets = rewards  # Actually returns, but we call them q_targets
 
     return states_empty, states_filled, actions, q_targets
-
-
-def collect_policy_rollouts(teacher, env, num_episodes):
-    """
-    Collect rollouts from teacher agent for imitation learning.
-
-    Returns:
-        states_empty: List of board_empty states
-        states_filled: List of board_filled states
-        actions: List of teacher actions
-    """
-    states_empty = []
-    states_filled = []
-    actions = []
-
-    for _ in tqdm(range(num_episodes), desc="Collecting rollouts"):
-        obs, _ = env.reset(seed=int(time.time() * 1e6))
-        done = False
-
-        while not done:
-            action = teacher.choose_action(obs)
-
-            # Store state and action
-            _, locked, active = teacher.parse_observation(obs)
-            board_empty = locked.copy()
-            board_filled = locked.copy()
-            board_filled[active > 0] = 1.0
-
-            states_empty.append(board_empty)
-            states_filled.append(board_filled)
-            actions.append(action)
-
-            # Take step
-            obs, _, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
-
-    return states_empty, states_filled, actions
 
 
 def train_value_network(args):
@@ -211,86 +172,8 @@ def train_value_network(args):
     print("\nTraining complete!")
 
 
-def train_policy_network(args):
-    """Train policy network with imitation learning."""
-    print("Training Policy Network")
-    print("=" * 50)
-
-    device = torch.device(args.device)
-
-    # Create environment and teacher
-    env = tetris.Tetris()
-    teacher = HeuristicAgent()
-
-    # Create model
-    model = PolicyNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    criterion = nn.CrossEntropyLoss()
-
-    # Collect rollouts
-    print(f"\nCollecting {args.num_episodes} episodes...")
-    states_empty, states_filled, actions = collect_policy_rollouts(
-        teacher, env, args.num_episodes
-    )
-
-    # Convert to tensors
-    states_empty = torch.FloatTensor(np.array(states_empty)).unsqueeze(1).to(device)
-    states_filled = torch.FloatTensor(np.array(states_filled)).unsqueeze(1).to(device)
-    actions = torch.LongTensor(actions).to(device)
-
-    print(f"Dataset size: {len(actions)} samples")
-
-    # Training loop
-    model.train()
-    best_loss = float('inf')
-
-    for epoch in range(args.epochs):
-        # Shuffle data
-        indices = torch.randperm(len(actions))
-        total_loss = 0
-        num_batches = 0
-
-        # Mini-batch training
-        for i in range(0, len(indices), args.batch_size):
-            batch_idx = indices[i:i+args.batch_size]
-
-            batch_empty = states_empty[batch_idx]
-            batch_filled = states_filled[batch_idx]
-            batch_actions = actions[batch_idx]
-
-            # Forward pass
-            logits = model(batch_empty, batch_filled)
-
-            # Compute loss
-            loss = criterion(logits, batch_actions)
-
-            # Backward pass
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            total_loss += loss.item()
-            num_batches += 1
-
-        avg_loss = total_loss / num_batches
-        print(f"Epoch {epoch+1}/{args.epochs} - Loss: {avg_loss:.6f}")
-
-        # Save best model
-        if avg_loss < best_loss:
-            best_loss = avg_loss
-            output_dir = os.path.dirname(args.output)
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
-            torch.save(model.state_dict(), args.output)
-            print(f"Saved best model to {args.output}")
-
-    print("\nTraining complete!")
-
-
 def main():
     parser = argparse.ArgumentParser(description="Supervised training for Tetris")
-    parser.add_argument('--mode', type=str, required=True, choices=['value', 'policy'],
-                        help="Training mode: 'value' or 'policy'")
     parser.add_argument('--num-episodes', type=int, default=100,
                         help="Number of episodes to collect")
     parser.add_argument('--epochs', type=int, default=20,
@@ -308,10 +191,7 @@ def main():
 
     args = parser.parse_args()
 
-    if args.mode == 'value':
-        train_value_network(args)
-    else:
-        train_policy_network(args)
+    train_value_network(args)
 
 
 if __name__ == '__main__':
