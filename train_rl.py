@@ -19,7 +19,7 @@ from pufferlib.ocean.tetris import tetris
 
 from model import ValueNetwork
 from value_agent import ValueAgent
-from reward_utils import compute_all_heuristic_rewards, compute_heuristic_reward
+from reward_utils import compute_lines_cleared, compute_simple_reward
 
 
 class ReplayBuffer:
@@ -51,21 +51,9 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-def extract_piece_shape_from_board(active_piece):
-    """Extract piece shape from active piece board."""
-    piece_positions = np.argwhere(active_piece > 0)
-    if len(piece_positions) == 0:
-        return None
-
-    min_row, min_col = piece_positions.min(axis=0)
-    max_row, max_col = piece_positions.max(axis=0)
-    piece_shape = active_piece[min_row:max_row+1, min_col:max_col+1]
-    return piece_shape
-
-
 def train_value_rl(args):
-    """Train value network with Q-learning."""
-    print("Training Value Network with Q-Learning")
+    """Train value network with Q-learning using simple rewards."""
+    print("Training Value Network with Q-Learning (Simple Rewards)")
     print("=" * 50)
 
     device = torch.device(args.device)
@@ -125,11 +113,9 @@ def train_value_rl(args):
             next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
             _, next_locked, next_active = agent.parse_observation(next_obs_single)
 
-            # Compute action-conditioned heuristic reward (line clears + normalized heuristic score)
-            if done:
-                reward = -0.1  # Death penalty
-            else:
-                reward = compute_heuristic_reward(locked, active, next_locked, action)
+            # Compute simple reward based only on line clears
+            lines_cleared = compute_lines_cleared(locked, active, next_locked)
+            reward = compute_simple_reward(lines_cleared)
 
             next_empty = next_locked.copy()
             next_filled = next_locked.copy()
