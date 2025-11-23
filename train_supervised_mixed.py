@@ -175,14 +175,23 @@ def train_value_network(model, states_empty, states_filled, actions, q_targets,
         avg_loss = total_loss / num_batches
         print(f"Epoch {epoch+1}/{args.epochs} - Loss: {avg_loss:.6f}", flush=True)
 
+        # Save checkpoint every epoch
+        output_dir = os.path.dirname(args.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+        # Save epoch checkpoint
+        base_name = args.output.rsplit('.', 1)[0]  # Remove extension
+        ext = args.output.rsplit('.', 1)[1] if '.' in args.output else 'pth'
+        epoch_checkpoint = f"{base_name}_epoch{epoch+1}.{ext}"
+        torch.save(model.state_dict(), epoch_checkpoint)
+        print(f"Saved checkpoint to {epoch_checkpoint}", flush=True)
+
         # Save best model
         if avg_loss < best_loss:
             best_loss = avg_loss
-            output_dir = os.path.dirname(args.output)
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
             torch.save(model.state_dict(), args.output)
-            print(f"Saved best model to {args.output}")
+            print(f"Saved best model to {args.output}", flush=True)
 
     print("\nTraining complete!")
 
