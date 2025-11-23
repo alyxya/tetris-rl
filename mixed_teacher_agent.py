@@ -40,11 +40,11 @@ class MixedTeacherAgent(BaseAgent):
 
         Samples new random_prob and heuristic_temperature:
         - random_prob = (uniform(0, 1))^3
-        - heuristic_temperature = (uniform(0, 1))^3 / 10
+        - heuristic_temperature = (uniform(0, 1))^3
         """
         # Sample per-episode parameters
         self.random_prob = np.random.uniform(0, 1) ** 3
-        self.heuristic_temperature = (np.random.uniform(0, 1) ** 3) / 10.0
+        self.heuristic_temperature = np.random.uniform(0, 1) ** 3
 
         # Create heuristic agent with sampled temperature
         self.heuristic_agent = HeuristicAgent(
