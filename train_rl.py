@@ -129,7 +129,7 @@ def train_value_rl(args):
 
             # Compute action-conditioned heuristic reward (line clears + normalized heuristic score)
             if done:
-                reward = 0.0
+                reward = -0.1  # Death penalty
             else:
                 reward = compute_heuristic_reward(locked, active, next_locked, action)
 
@@ -267,7 +267,7 @@ def train_policy_rl(args):
 
             # Compute action-conditioned heuristic reward (line clears + normalized heuristic score)
             if done:
-                reward = 0.0
+                reward = -0.1  # Death penalty
             else:
                 reward = compute_heuristic_reward(locked, active, next_locked, action)
             rewards.append(reward)
