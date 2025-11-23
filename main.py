@@ -54,11 +54,15 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed
 
         # Show rewards if requested
         if show_rewards and hasattr(agent, 'parse_observation'):
-            next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
-            _, next_locked, _ = agent.parse_observation(next_obs_single)
-
-            lines_cleared = compute_lines_cleared(locked, active, next_locked)
-            reward = compute_simple_reward(lines_cleared)
+            # Compute reward (0 if episode ended)
+            if done:
+                lines_cleared = 0
+                reward = 0.0
+            else:
+                next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
+                _, next_locked, _ = agent.parse_observation(next_obs_single)
+                lines_cleared = compute_lines_cleared(locked, active, next_locked)
+                reward = compute_simple_reward(lines_cleared)
 
             # Get Q-values if this is a value agent
             q_values = None
@@ -67,6 +71,8 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed
 
             if lines_cleared > 0:
                 print(f"\n  Step {steps}: Action={ACTION_NAMES[action]} (Lines cleared: {lines_cleared}, reward={reward:.4f})")
+            elif done:
+                print(f"\n  Step {steps}: Action={ACTION_NAMES[action]} (Episode ended)")
             else:
                 print(f"\n  Step {steps}: Action={ACTION_NAMES[action]}")
 

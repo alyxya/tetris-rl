@@ -44,10 +44,13 @@ for ep in range(num_test_episodes):
         done = terminated[0] or truncated[0]
 
         # Compute reward
-        next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
-        _, next_locked, _ = agent.parse_observation(next_obs_single)
-        lines = compute_lines_cleared(locked, active, next_locked)
-        reward = compute_simple_reward(lines)
+        if done:
+            reward = 0.0
+        else:
+            next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
+            _, next_locked, _ = agent.parse_observation(next_obs_single)
+            lines = compute_lines_cleared(locked, active, next_locked)
+            reward = compute_simple_reward(lines)
 
         total_reward += reward
         steps += 1

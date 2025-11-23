@@ -41,13 +41,16 @@ def collect_episode_rewards(env, agent, verbose=False):
         done = terminated[0] or truncated[0]
         env_reward = env_reward[0] if hasattr(env_reward, '__getitem__') else env_reward
 
-        # Parse next state
-        next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
-        _, next_locked, _ = agent.parse_observation(next_obs_single)
-
         # Compute simple reward (line clears only)
-        lines_cleared = compute_lines_cleared(locked, active, next_locked)
-        simple_reward = compute_simple_reward(lines_cleared)
+        if done:
+            # No reward on death (board state is invalid)
+            simple_reward = 0.0
+        else:
+            # Parse next state
+            next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
+            _, next_locked, _ = agent.parse_observation(next_obs_single)
+            lines_cleared = compute_lines_cleared(locked, active, next_locked)
+            simple_reward = compute_simple_reward(lines_cleared)
 
         episode_data.append((steps, action, env_reward, simple_reward))
 
