@@ -109,13 +109,19 @@ def train_value_rl(args):
             next_obs, _, terminated, truncated, _ = env.step([action])
             done = terminated[0] or truncated[0]
 
-            # Parse next state
-            next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
-            _, next_locked, next_active = agent.parse_observation(next_obs_single)
-
             # Compute simple reward based only on line clears
-            lines_cleared = compute_lines_cleared(locked, active, next_locked)
-            reward = compute_simple_reward(lines_cleared)
+            if done:
+                # No reward on death (board state is invalid)
+                reward = 0.0
+                # Parse next state for storing in buffer
+                next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
+                _, next_locked, next_active = agent.parse_observation(next_obs_single)
+            else:
+                # Parse next state
+                next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
+                _, next_locked, next_active = agent.parse_observation(next_obs_single)
+                lines_cleared = compute_lines_cleared(locked, active, next_locked)
+                reward = compute_simple_reward(lines_cleared)
 
             next_empty = next_locked.copy()
             next_filled = next_locked.copy()

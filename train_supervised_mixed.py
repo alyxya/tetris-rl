@@ -74,13 +74,17 @@ def collect_rollouts(agent, env, num_episodes, gamma=0.99):
             next_obs, _, terminated, truncated, _ = env.step([action])
             done = terminated[0] or truncated[0]
 
-            # Get next state to compute reward
-            next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
-            _, next_locked, _ = agent.parse_observation(next_obs_single)
-
             # Compute reward based on line clears
-            lines_cleared = compute_lines_cleared(locked, active, next_locked)
-            reward = compute_simple_reward(lines_cleared)
+            if done:
+                # No reward on death (board state is invalid)
+                reward = 0.0
+            else:
+                # Get next state to compute reward
+                next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
+                _, next_locked, _ = agent.parse_observation(next_obs_single)
+                lines_cleared = compute_lines_cleared(locked, active, next_locked)
+                reward = compute_simple_reward(lines_cleared)
+
             episode_rewards.append(reward)
 
             # Move to next state
