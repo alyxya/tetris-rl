@@ -210,7 +210,7 @@ def main():
                         help="Number of training epochs")
     parser.add_argument('--batch-size', type=int, default=64,
                         help="Batch size for training")
-    parser.add_argument('--lr', type=float, default=1e-3,
+    parser.add_argument('--lr', type=float, default=1e-4,
                         help="Learning rate")
     parser.add_argument('--gamma', type=float, default=0.99,
                         help="Discount factor")
