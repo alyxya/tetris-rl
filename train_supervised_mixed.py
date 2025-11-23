@@ -218,6 +218,8 @@ def main():
                         help="Path to save collected dataset (optional)")
     parser.add_argument('--load-data', type=str, default=None,
                         help="Path to load pre-collected dataset (optional)")
+    parser.add_argument('--init-model', type=str, default=None,
+                        help="Path to pretrained model to continue training from (optional)")
 
     args = parser.parse_args()
 
@@ -265,6 +267,17 @@ def main():
 
     # Create and train model
     model = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
+
+    # Load pretrained weights if provided
+    if args.init_model:
+        print(f"\nLoading pretrained model from {args.init_model}...")
+        checkpoint = torch.load(args.init_model, map_location=device, weights_only=False)
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            model.load_state_dict(checkpoint)
+        print("Model loaded successfully!")
+
     train_value_network(model, states_empty, states_filled, actions, q_targets,
                        args, device)
 
