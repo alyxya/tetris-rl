@@ -140,8 +140,13 @@ def train_value_network(model, states_empty, states_filled, actions, q_targets,
         total_loss = 0
         num_batches = 0
 
-        # Mini-batch training
-        for i in range(0, len(indices), args.batch_size):
+        # Mini-batch training with progress bar
+        num_total_batches = (len(indices) + args.batch_size - 1) // args.batch_size
+        pbar = tqdm(range(0, len(indices), args.batch_size),
+                    desc=f"Epoch {epoch+1}/{args.epochs}",
+                    total=num_total_batches)
+
+        for i in pbar:
             batch_idx = indices[i:i+args.batch_size]
 
             batch_empty = states_empty[batch_idx]
@@ -164,8 +169,11 @@ def train_value_network(model, states_empty, states_filled, actions, q_targets,
             total_loss += loss.item()
             num_batches += 1
 
+            # Update progress bar with running loss
+            pbar.set_postfix({'loss': f'{total_loss / num_batches:.6f}'})
+
         avg_loss = total_loss / num_batches
-        print(f"Epoch {epoch+1}/{args.epochs} - Loss: {avg_loss:.6f}")
+        print(f"Epoch {epoch+1}/{args.epochs} - Loss: {avg_loss:.6f}", flush=True)
 
         # Save best model
         if avg_loss < best_loss:
