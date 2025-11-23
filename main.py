@@ -14,7 +14,7 @@ from pufferlib.ocean.tetris import tetris
 from heuristic_agent import HeuristicAgent
 from value_agent import ValueAgent
 from hybrid_agent import HybridAgent
-from reward_utils import compute_all_heuristic_rewards, ACTION_NAMES
+from reward_utils import compute_lines_cleared, compute_simple_reward, ACTION_NAMES
 
 
 def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed=None):
@@ -52,12 +52,13 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed
         next_obs, _, terminated, truncated, _ = env.step([action])
         done = terminated[0] or truncated[0]
 
-        # Show heuristic rewards if requested
+        # Show rewards if requested
         if show_rewards and hasattr(agent, 'parse_observation'):
             next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
             _, next_locked, _ = agent.parse_observation(next_obs_single)
 
-            rewards, lines_cleared = compute_all_heuristic_rewards(locked, active, next_locked)
+            lines_cleared = compute_lines_cleared(locked, active, next_locked)
+            reward = compute_simple_reward(lines_cleared)
 
             # Get Q-values if this is a value agent
             q_values = None
@@ -65,19 +66,15 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed
                 q_values = agent.get_q_values(obs_single)
 
             if lines_cleared > 0:
-                print(f"\n  Step {steps}: Action={ACTION_NAMES[action]} (Lines cleared: {lines_cleared}, reward={rewards[action]:.4f})")
+                print(f"\n  Step {steps}: Action={ACTION_NAMES[action]} (Lines cleared: {lines_cleared}, reward={reward:.4f})")
             else:
                 print(f"\n  Step {steps}: Action={ACTION_NAMES[action]}")
-                if q_values is not None:
-                    print(f"    Rewards by action:                Values by action:")
-                    for act in range(7):
-                        marker = " <--" if act == action else ""
-                        print(f"      {ACTION_NAMES[act]:>10s}: {rewards[act]:+.6f}{marker}    {ACTION_NAMES[act]:>10s}: {q_values[act]:+.6f}{marker}")
-                else:
-                    print(f"    Rewards by action:")
-                    for act in range(7):
-                        marker = " <--" if act == action else ""
-                        print(f"      {ACTION_NAMES[act]:>10s}: {rewards[act]:+.6f}{marker}")
+
+            if q_values is not None:
+                print(f"    Q-values by action:")
+                for act in range(7):
+                    marker = " <--" if act == action else ""
+                    print(f"      {ACTION_NAMES[act]:>10s}: {q_values[act]:+.6f}{marker}")
 
         if render:
             env.render()
