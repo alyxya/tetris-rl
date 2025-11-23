@@ -26,7 +26,7 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed
         agent: Agent to use
         render: Whether to render the game
         verbose: Whether to print progress
-        show_rewards: Whether to show heuristic rewards for each action
+        show_rewards: Whether to show rewards and Q-values for each action
         seed: Random seed for environment reset
 
     Returns:
@@ -105,7 +105,7 @@ def main():
     parser.add_argument('--device', type=str, default='cpu',
                         help='Device for neural networks (cpu or cuda)')
     parser.add_argument('--show-rewards', action='store_true',
-                        help='Show heuristic reward values for all actions at each step')
+                        help='Show line-clear rewards and Q-values at each step')
     parser.add_argument('--seed', type=int, default=None,
                         help='Random seed for reproducibility')
 

@@ -11,8 +11,7 @@ import time
 from pufferlib.ocean.tetris import tetris
 from heuristic_agent import HeuristicAgent
 from hybrid_agent import HybridAgent
-import heuristic as heuristic_module
-from train_rl import compute_heuristic_reward
+from reward_utils import compute_lines_cleared, compute_simple_reward
 
 
 def collect_episode_rewards(env, agent, verbose=False):
@@ -20,7 +19,7 @@ def collect_episode_rewards(env, agent, verbose=False):
     Collect detailed reward information for a single episode.
 
     Returns:
-        episode_rewards: List of (step, action, env_reward, heuristic_reward) tuples
+        episode_rewards: List of (step, action, env_reward, simple_reward) tuples
         total_steps: Total steps in episode
     """
     obs, _ = env.reset(seed=int(time.time() * 1e6))
@@ -46,13 +45,14 @@ def collect_episode_rewards(env, agent, verbose=False):
         next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
         _, next_locked, _ = agent.parse_observation(next_obs_single)
 
-        # Compute heuristic reward (line clears + distance nudge)
-        heuristic_reward = compute_heuristic_reward(locked, active, next_locked)
+        # Compute simple reward (line clears only)
+        lines_cleared = compute_lines_cleared(locked, active, next_locked)
+        simple_reward = compute_simple_reward(lines_cleared)
 
-        episode_data.append((steps, action, env_reward, heuristic_reward))
+        episode_data.append((steps, action, env_reward, simple_reward))
 
         if verbose and steps % 500 == 0:
-            print(f"  Step {steps}: env_reward={env_reward:.3f}, heuristic_reward={heuristic_reward:.3f}")
+            print(f"  Step {steps}: env_reward={env_reward:.3f}, simple_reward={simple_reward:.3f}")
 
         steps += 1
         obs = next_obs
@@ -64,15 +64,15 @@ def analyze_rewards(episodes_data):
     """Print reward statistics from collected episodes."""
 
     all_env_rewards = []
-    all_heuristic_rewards = []
+    all_simple_rewards = []
     all_steps = []
 
     for episode_data, total_steps in episodes_data:
         env_rewards = [r[2] for r in episode_data]
-        heuristic_rewards = [r[3] for r in episode_data]
+        simple_rewards = [r[3] for r in episode_data]
 
         all_env_rewards.extend(env_rewards)
-        all_heuristic_rewards.extend(heuristic_rewards)
+        all_simple_rewards.extend(simple_rewards)
         all_steps.append(total_steps)
 
     print("\n" + "=" * 70)
@@ -93,13 +93,13 @@ def analyze_rewards(episodes_data):
     if nonzero_env:
         print(f"  Non-zero mean: {np.mean(nonzero_env):.6f}")
 
-    # Heuristic rewards
-    print("\nHeuristic Rewards (from heuristic evaluation function):")
-    print(f"  Mean:    {np.mean(all_heuristic_rewards):.6f}")
-    print(f"  Std:     {np.std(all_heuristic_rewards):.6f}")
-    print(f"  Min:     {np.min(all_heuristic_rewards):.6f}")
-    print(f"  Max:     {np.max(all_heuristic_rewards):.6f}")
-    print(f"  Median:  {np.median(all_heuristic_rewards):.6f}")
+    # Simple rewards
+    print("\nSimple Rewards (line clears only: 0.1/0.3/0.6/1.0):")
+    print(f"  Mean:    {np.mean(all_simple_rewards):.6f}")
+    print(f"  Std:     {np.std(all_simple_rewards):.6f}")
+    print(f"  Min:     {np.min(all_simple_rewards):.6f}")
+    print(f"  Max:     {np.max(all_simple_rewards):.6f}")
+    print(f"  Median:  {np.median(all_simple_rewards):.6f}")
 
     # Episode statistics
     print("\nEpisode Statistics:")
@@ -113,8 +113,8 @@ def analyze_rewards(episodes_data):
     print("\nCumulative Rewards per Episode:")
     for i, (episode_data, total_steps) in enumerate(episodes_data):
         env_sum = sum(r[2] for r in episode_data)
-        heuristic_sum = sum(r[3] for r in episode_data)
-        print(f"  Episode {i+1}: env={env_sum:.2f}, heuristic={heuristic_sum:.2f}, steps={total_steps}")
+        simple_sum = sum(r[3] for r in episode_data)
+        print(f"  Episode {i+1}: env={env_sum:.2f}, simple={simple_sum:.2f}, steps={total_steps}")
 
     # Reward distribution
     print("\nEnvironment Reward Distribution:")
@@ -170,8 +170,8 @@ def main():
         episodes_data.append((episode_data, total_steps))
 
         env_sum = sum(r[2] for r in episode_data)
-        heuristic_sum = sum(r[3] for r in episode_data)
-        print(f"  Finished: {total_steps} steps, env_reward={env_sum:.2f}, heuristic_reward={heuristic_sum:.2f}")
+        simple_sum = sum(r[3] for r in episode_data)
+        print(f"  Finished: {total_steps} steps, env_reward={env_sum:.2f}, simple_reward={simple_sum:.2f}")
 
         # Reset hybrid agent stats for next episode
         if hasattr(agent, 'reset_stats'):
