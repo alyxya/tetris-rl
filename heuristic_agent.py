@@ -22,7 +22,7 @@ ACTION_HOLD = 6
 class HeuristicAgent(BaseAgent):
     """Agent that selects actions based on heuristic evaluation."""
 
-    def __init__(self, n_rows=20, n_cols=10, weights=None):
+    def __init__(self, n_rows=20, n_cols=10, weights=None, temperature=0.0):
         """
         Initialize heuristic agent.
 
@@ -30,6 +30,7 @@ class HeuristicAgent(BaseAgent):
             n_rows: Board height
             n_cols: Board width
             weights: Heuristic weights dict (or None for defaults)
+            temperature: Temperature for softmax sampling (0 = greedy)
         """
         super().__init__(n_rows, n_cols)
         # Use original heuristic weights
@@ -42,6 +43,7 @@ class HeuristicAgent(BaseAgent):
                 'bumpiness': -0.18,
             }
         self.weights = weights
+        self.temperature = temperature
 
         # State tracking for multi-step plans
         self.target_column = None
@@ -77,7 +79,7 @@ class HeuristicAgent(BaseAgent):
         # Find best placement if we don't have a target
         if self.target_column is None or self.target_rotation is None:
             self.target_rotation, self.target_column, _ = heuristic.find_best_placement(
-                locked_board, piece_shape, self.weights
+                locked_board, piece_shape, self.weights, self.temperature
             )
             self.current_rotations = 0
 

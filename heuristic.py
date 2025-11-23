@@ -174,7 +174,7 @@ def evaluate_placement(board, piece_shape, rotation, target_col, weights=None):
     return score, lines_cleared
 
 
-def find_best_placement(board, piece_shape, weights=None):
+def find_best_placement(board, piece_shape, weights=None, temperature=0.0):
     """
     Find the best rotation and column to place the piece.
 
@@ -182,6 +182,7 @@ def find_best_placement(board, piece_shape, weights=None):
         board: Current locked board state
         piece_shape: Current piece shape
         weights: Heuristic weights dict
+        temperature: Temperature for softmax sampling (0 = greedy)
 
     Returns:
         best_rotation: Best number of CW rotations (0-3)
@@ -189,8 +190,9 @@ def find_best_placement(board, piece_shape, weights=None):
         best_score: Best heuristic score
     """
     n_cols = board.shape[1]
-    best_options = []  # Store all (rotation, col) pairs with best score
-    best_score = float('-inf')
+
+    # Collect all valid placements with their scores
+    all_placements = []  # List of (rotation, col, score) tuples
 
     # Try all rotations and columns
     for rotation in range(4):
@@ -202,15 +204,19 @@ def find_best_placement(board, piece_shape, weights=None):
 
         for col in range(n_cols - piece_width + 1):
             score, _ = evaluate_placement(board, piece_shape, rotation, col, weights)
+            if score > float('-inf'):  # Only include valid placements
+                all_placements.append((rotation, col, score))
 
-            if score > best_score:
-                best_score = score
-                best_options = [(rotation, col)]
-            elif score == best_score:
-                best_options.append((rotation, col))
+    if not all_placements:
+        return 0, None, float('-inf')
 
-    # Deterministically choose among tied options based on board state hash
-    if best_options:
+    # If temperature is 0 or very close to 0, use greedy selection
+    if temperature < 1e-6:
+        # Find best score
+        best_score = max(score for _, _, score in all_placements)
+        best_options = [(rot, col) for rot, col, score in all_placements if score == best_score]
+
+        # Deterministically choose among tied options based on board state hash
         # First, prefer placements with fewer rotations
         min_rotations = min(rot for rot, col in best_options)
         fewest_rotation_options = [(rot, col) for rot, col in best_options if rot == min_rotations]
@@ -219,7 +225,22 @@ def find_best_placement(board, piece_shape, weights=None):
         board_hash = hash(board.tobytes())
         idx = board_hash % len(fewest_rotation_options)
         best_rotation, best_col = fewest_rotation_options[idx]
-    else:
-        best_rotation, best_col = 0, None
+        return best_rotation, best_col, best_score
+
+    # Temperature-based softmax selection
+    scores = np.array([score for _, _, score in all_placements])
+
+    # Apply softmax with temperature
+    # Subtract max for numerical stability
+    exp_scores = np.exp((scores - np.max(scores)) / temperature)
+    probabilities = exp_scores / np.sum(exp_scores)
+
+    # Use deterministic random seed based on board hash
+    board_hash = hash(board.tobytes())
+    rng = np.random.RandomState(seed=board_hash & 0xFFFFFFFF)  # Use lower 32 bits
+
+    # Sample from the distribution
+    chosen_idx = rng.choice(len(all_placements), p=probabilities)
+    best_rotation, best_col, best_score = all_placements[chosen_idx]
 
     return best_rotation, best_col, best_score

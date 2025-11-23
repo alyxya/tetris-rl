@@ -112,9 +112,9 @@ def main():
     parser.add_argument('--seed', type=int, default=None,
                         help='Random seed for reproducibility')
 
-    # Value agent options
-    parser.add_argument('--temperature', type=float, default=None,
-                        help='Sampling temperature for value agent (default: 0.0)')
+    # Agent options
+    parser.add_argument('--temperature', type=float, default=0.0,
+                        help='Sampling temperature for agents (default: 0.0)')
     parser.add_argument('--epsilon', type=float, default=0.0,
                         help='Exploration epsilon for value agent')
 
@@ -139,8 +139,10 @@ def main():
 
     # Create agent
     if args.agent == 'heuristic':
-        agent = HeuristicAgent()
+        agent = HeuristicAgent(temperature=args.temperature)
         print(f"Running HeuristicAgent for {args.episodes} episode(s)...")
+        if args.temperature > 0:
+            print(f"  Temperature: {args.temperature}")
 
     elif args.agent == 'value':
         if not args.model_path:
@@ -167,7 +169,7 @@ def main():
             if name == 'random':
                 sub_agents.append('random')
             elif name == 'heuristic':
-                sub_agents.append(HeuristicAgent())
+                sub_agents.append(HeuristicAgent(temperature=args.temperature))
             elif name == 'value':
                 model_path = args.value_model or args.model_path
                 if not model_path:
@@ -197,9 +199,8 @@ def main():
         # Special handling for value agent parameters
         if args.agent == 'value':
             original_choose = agent.choose_action
-            temp = args.temperature if args.temperature is not None else 0.0
             def choose_action_wrapper(obs):
-                return original_choose(obs, epsilon=args.epsilon, temperature=temp)
+                return original_choose(obs, epsilon=args.epsilon, temperature=args.temperature)
             agent.choose_action = choose_action_wrapper
 
         steps = run_episode(env, agent, render=args.render, verbose=args.verbose, show_rewards=args.show_rewards, seed=episode_seed)
