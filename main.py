@@ -14,6 +14,7 @@ from pufferlib.ocean.tetris import tetris
 from heuristic_agent import HeuristicAgent
 from value_agent import ValueAgent
 from hybrid_agent import HybridAgent
+from mixed_teacher_agent import MixedTeacherAgent
 from reward_utils import compute_lines_cleared, compute_simple_reward, ACTION_NAMES
 
 
@@ -98,7 +99,7 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Run Tetris agents')
     parser.add_argument('--agent', type=str, required=True,
-                        choices=['heuristic', 'value', 'hybrid'],
+                        choices=['heuristic', 'value', 'hybrid', 'mixed'],
                         help='Agent type to use')
     parser.add_argument('--model-path', type=str, default=None,
                         help='Path to model weights (for value agent)')
@@ -186,6 +187,11 @@ def main():
         print(f"  Agents: {agent_names}")
         print(f"  Probabilities: {probs}")
 
+    elif args.agent == 'mixed':
+        agent = MixedTeacherAgent()
+        print(f"Running MixedTeacherAgent for {args.episodes} episode(s)...")
+        print(f"  Random prob & temperature: (uniform(0,1))^5 per episode")
+
     else:
         raise ValueError(f"Unknown agent: {args.agent}")
 
@@ -214,7 +220,11 @@ def main():
 
         all_steps.append(steps)
 
-        print(f"Episode {episode + 1} finished: {steps} steps")
+        # Show mixed teacher parameters
+        if args.agent == 'mixed':
+            print(f"Episode {episode + 1} finished: {steps} steps (random_prob={agent.random_prob:.4f}, temp={agent.heuristic_temperature:.4f})")
+        else:
+            print(f"Episode {episode + 1} finished: {steps} steps")
 
         # Print usage stats for hybrid agent
         if args.agent == 'hybrid':
