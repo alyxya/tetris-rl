@@ -180,4 +180,5 @@ def compute_shaped_reward(old_board, new_board, lines_cleared):
     # Reward = reduction in sum of squares (negative change)
     # If new_sum_sq < old_sum_sq (height decreased), reward is positive
     # If new_sum_sq > old_sum_sq (height increased), reward is negative
-    return old_sum_sq - new_sum_sq
+    # Scaled by 0.1 to make values more manageable for learning
+    return (old_sum_sq - new_sum_sq) * 0.1

@@ -254,8 +254,9 @@ python train_supervised_mixed.py \
 - HOLD action (action 6) completely removed from model architecture
 - Training automatically filters out all action=6 transitions from datasets
 
-**Reward Structure: PURE QUADRATIC HEIGHT**
-- **Reward = sum(old_heights²) - sum(new_heights²)**
+**Reward Structure: PURE QUADRATIC HEIGHT (SCALED)**
+- **Reward = (sum(old_heights²) - sum(new_heights²)) × 0.1**
+- Scaled by 0.1 for better numerical stability and learning
 - Simple and clean: reward any action that reduces sum of squared heights
 - Line clears implicitly rewarded (they reduce height)
 - Stacking high heavily penalized due to quadratic growth
