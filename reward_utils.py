@@ -158,12 +158,12 @@ def compute_shaped_reward(old_board, new_board, lines_cleared):
     Reward = f(new_board) - f(old_board) + line_clear_bonus
 
     Where f(board) penalizes:
-    - Aggregate height (sum of column heights)
+    - Aggregate height (sum of column heights SQUARED - quadratic penalty)
     - Holes (empty cells below filled cells)
     - Bumpiness (unevenness of surface)
 
-    Research-backed weights:
-    - Aggregate height: -0.51
+    Weights:
+    - Aggregate height (quadratic): -0.51
     - Holes: -0.36
     - Bumpiness: -0.18
     - Line bonuses: {1: 1.0, 2: 3.0, 3: 5.0, 4: 10.0}
@@ -188,8 +188,9 @@ def compute_shaped_reward(old_board, new_board, lines_cleared):
 
     # State evaluation function f(board)
     def f(heights, holes, bumpiness):
-        aggregate_height = sum(heights)
-        return -0.51 * aggregate_height - 0.36 * holes - 0.18 * bumpiness
+        # Quadratic height penalty: sum of squares
+        aggregate_height_sq = sum(h * h for h in heights)
+        return -0.51 * aggregate_height_sq - 0.36 * holes - 0.18 * bumpiness
 
     # Differential reward
     old_value = f(old_heights, old_holes, old_bumpiness)
