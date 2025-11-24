@@ -49,6 +49,11 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed
         if show_rewards and hasattr(agent, 'parse_observation'):
             _, locked, active = agent.parse_observation(obs_single)
 
+        # Get Q-values BEFORE taking action (for correct display)
+        q_values_before = None
+        if show_rewards and hasattr(agent, 'get_q_values'):
+            q_values_before = agent.get_q_values(obs_single)
+
         action = agent.choose_action(obs_single)
         next_obs, _, terminated, truncated, _ = env.step([action])
         done = terminated[0] or truncated[0]
@@ -75,10 +80,8 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed
                     # No piece lock, no reward
                     reward = 0.0
 
-            # Get Q-values if this is a value agent
-            q_values = None
-            if hasattr(agent, 'get_q_values'):
-                q_values = agent.get_q_values(obs_single)
+            # Use Q-values computed before action (if available)
+            q_values = q_values_before
 
             # Print action and reward
             if done:
