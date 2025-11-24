@@ -1,8 +1,8 @@
 """
 Supervised learning for Tetris Q-value network with mixed teacher.
 
-Uses a combination of random actions and heuristic agent to collect training data.
-Trains the value network to predict Q-values based on simple line-clear rewards.
+Uses teacher demonstrations to collect transitions (s, a, r, s', done).
+Trains the value network iteratively using Bellman equation to converge to optimal Q-values.
 """
 
 import argparse
@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from tqdm import tqdm
 import time
 import os
@@ -21,36 +22,21 @@ from mixed_teacher_agent import MixedTeacherAgent
 from reward_utils import compute_lines_cleared, compute_simple_reward
 
 
-def collect_rollouts(agent, env, num_episodes, gamma=0.99):
+def collect_transitions(agent, env, num_episodes):
     """
-    Collect rollouts from mixed teacher and compute Q-value targets.
-
-    For each state-action pair, compute the reward based on line clears
-    and propagate future rewards with discounting.
+    Collect transitions from teacher demonstrations.
 
     Returns:
-        states_empty: List of board_empty states
-        states_filled: List of board_filled states
-        actions: List of actions taken
-        q_targets: List of Q-value targets (discounted returns)
+        transitions: List of (state_empty, state_filled, action, reward, next_empty, next_filled, done)
     """
-    all_states_empty = []
-    all_states_filled = []
-    all_actions = []
-    all_q_targets = []
+    transitions = []
 
-    for _ in tqdm(range(num_episodes), desc="Collecting rollouts"):
-        # Reset agent for new episode (samples new random_prob and temperature)
+    for _ in tqdm(range(num_episodes), desc="Collecting transitions"):
+        # Reset agent for new episode
         agent.reset()
 
         obs, _ = env.reset(seed=int(time.time() * 1e6))
         done = False
-
-        # Episode data
-        episode_states_empty = []
-        episode_states_filled = []
-        episode_actions = []
-        episode_rewards = []
 
         while not done:
             # Extract single observation from batch
@@ -62,13 +48,8 @@ def collect_rollouts(agent, env, num_episodes, gamma=0.99):
             board_filled = locked.copy()
             board_filled[active > 0] = 1.0
 
-            # Choose action using mixed teacher
+            # Choose action using teacher
             action = agent.choose_action(obs_single)
-
-            # Store state and action
-            episode_states_empty.append(board_empty)
-            episode_states_filled.append(board_filled)
-            episode_actions.append(action)
 
             # Take step in environment
             next_obs, _, terminated, truncated, _ = env.step([action])
@@ -78,61 +59,63 @@ def collect_rollouts(agent, env, num_episodes, gamma=0.99):
             if done:
                 # No reward on death (board state is invalid)
                 reward = 0.0
+                # Use dummy next state (won't be used due to done=True)
+                next_empty = board_empty.copy()
+                next_filled = board_filled.copy()
             else:
                 # Get next state to compute reward
                 next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
-                _, next_locked, _ = agent.parse_observation(next_obs_single)
+                _, next_locked, next_active = agent.parse_observation(next_obs_single)
                 lines_cleared = compute_lines_cleared(locked, active, next_locked)
                 reward = compute_simple_reward(lines_cleared)
 
-            episode_rewards.append(reward)
+                # Store next state
+                next_empty = next_locked.copy()
+                next_filled = next_locked.copy()
+                next_filled[next_active > 0] = 1.0
+
+            # Store transition
+            transitions.append((board_empty, board_filled, action, reward, next_empty, next_filled, done))
 
             # Move to next state
             obs = next_obs
 
-        # Compute discounted returns for this episode
-        returns = []
-        R = 0.0
-        for r in reversed(episode_rewards):
-            R = r + gamma * R
-            returns.insert(0, R)
-
-        # Add episode data to dataset
-        all_states_empty.extend(episode_states_empty)
-        all_states_filled.extend(episode_states_filled)
-        all_actions.extend(episode_actions)
-        all_q_targets.extend(returns)
-
-    return all_states_empty, all_states_filled, all_actions, all_q_targets
+    return transitions
 
 
-def train_value_network(model, states_empty, states_filled, actions, q_targets,
-                       args, device):
+def train_value_network(model, transitions, args, device):
     """
-    Train the value network on collected data.
+    Train the value network using iterative Q-learning with Bellman updates.
 
     Args:
         model: ValueNetwork model
-        states_empty: List of board_empty states
-        states_filled: List of board_filled states
-        actions: List of actions
-        q_targets: List of Q-value targets
+        transitions: List of (state_empty, state_filled, action, reward, next_empty, next_filled, done)
         args: Training arguments
         device: torch device
     """
-    # Convert to tensors
-    states_empty = torch.FloatTensor(np.array(states_empty)).unsqueeze(1).to(device)
-    states_filled = torch.FloatTensor(np.array(states_filled)).unsqueeze(1).to(device)
-    actions = torch.LongTensor(actions).to(device)
-    q_targets = torch.FloatTensor(q_targets).to(device)
+    print(f"\nDataset size: {len(transitions)} transitions")
 
-    print(f"\nDataset size: {len(actions)} samples")
-    print(f"Q-target stats: mean={q_targets.mean():.4f}, std={q_targets.std():.4f}, "
-          f"min={q_targets.min():.4f}, max={q_targets.max():.4f}")
+    # Analyze reward distribution
+    rewards = [t[3] for t in transitions]
+    print(f"Reward stats: mean={np.mean(rewards):.4f}, "
+          f"nonzero={100*np.mean(np.array(rewards) > 0):.1f}%")
 
-    # Setup optimizer and loss
+    # Convert transitions to arrays for batching
+    states_empty = np.array([t[0] for t in transitions])
+    states_filled = np.array([t[1] for t in transitions])
+    actions = np.array([t[2] for t in transitions])
+    rewards = np.array([t[3] for t in transitions])
+    next_empty = np.array([t[4] for t in transitions])
+    next_filled = np.array([t[5] for t in transitions])
+    dones = np.array([t[6] for t in transitions])
+
+    # Setup optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    criterion = nn.MSELoss()
+
+    # Create target network for stable Q-learning
+    target_model = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
+    target_model.load_state_dict(model.state_dict())
+    target_model.eval()
 
     # Training loop
     model.train()
@@ -140,7 +123,7 @@ def train_value_network(model, states_empty, states_filled, actions, q_targets,
 
     for epoch in range(args.epochs):
         # Shuffle data
-        indices = torch.randperm(len(actions))
+        indices = np.random.permutation(len(transitions))
         total_loss = 0
         num_batches = 0
 
@@ -153,21 +136,32 @@ def train_value_network(model, states_empty, states_filled, actions, q_targets,
         for i in pbar:
             batch_idx = indices[i:i+args.batch_size]
 
-            batch_empty = states_empty[batch_idx]
-            batch_filled = states_filled[batch_idx]
-            batch_actions = actions[batch_idx]
-            batch_targets = q_targets[batch_idx]
+            # Get batch data
+            batch_empty = torch.FloatTensor(states_empty[batch_idx]).unsqueeze(1).to(device)
+            batch_filled = torch.FloatTensor(states_filled[batch_idx]).unsqueeze(1).to(device)
+            batch_actions = torch.LongTensor(actions[batch_idx]).to(device)
+            batch_rewards = torch.FloatTensor(rewards[batch_idx]).to(device)
+            batch_next_empty = torch.FloatTensor(next_empty[batch_idx]).unsqueeze(1).to(device)
+            batch_next_filled = torch.FloatTensor(next_filled[batch_idx]).unsqueeze(1).to(device)
+            batch_dones = torch.FloatTensor(dones[batch_idx]).to(device)
 
-            # Forward pass
+            # Compute Q-values for current state
             q_values = model(batch_empty, batch_filled)
             q_pred = q_values.gather(1, batch_actions.unsqueeze(1)).squeeze(1)
 
+            # Compute target Q-values using Bellman equation: Q(s,a) = r + γ * max_a' Q(s',a')
+            with torch.no_grad():
+                next_q_values = target_model(batch_next_empty, batch_next_filled)
+                next_q_max = next_q_values.max(1)[0]
+                q_target = batch_rewards + args.gamma * next_q_max * (1 - batch_dones)
+
             # Compute loss
-            loss = criterion(q_pred, batch_targets)
+            loss = F.mse_loss(q_pred, q_target)
 
             # Backward pass
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
             total_loss += loss.item()
@@ -179,6 +173,11 @@ def train_value_network(model, states_empty, states_filled, actions, q_targets,
         avg_loss = total_loss / num_batches
         print(f"Epoch {epoch+1}/{args.epochs} - Loss: {avg_loss:.6f}", flush=True)
 
+        # Update target network every few epochs
+        if (epoch + 1) % args.target_update == 0:
+            target_model.load_state_dict(model.state_dict())
+            print(f"Updated target network at epoch {epoch+1}", flush=True)
+
         # Save checkpoint every epoch
         output_dir = os.path.dirname(args.output)
         if output_dir:
@@ -187,7 +186,7 @@ def train_value_network(model, states_empty, states_filled, actions, q_targets,
         # Save epoch checkpoint
         base_name = args.output.rsplit('.', 1)[0]  # Remove extension
         ext = args.output.rsplit('.', 1)[1] if '.' in args.output else 'pth'
-        epoch_checkpoint = f"{base_name}_epoch{epoch+1}.{ext}"
+        epoch_checkpoint = f"{base_name}_epoch_{epoch+1}.{ext}"
         torch.save(model.state_dict(), epoch_checkpoint)
         print(f"Saved checkpoint to {epoch_checkpoint}", flush=True)
 
@@ -202,74 +201,64 @@ def train_value_network(model, states_empty, states_filled, actions, q_targets,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Supervised training for Tetris with mixed teacher"
+        description="Supervised training for Tetris with iterative Q-learning"
     )
     parser.add_argument('--num-episodes', type=int, default=1000,
                         help="Number of episodes to collect")
     parser.add_argument('--epochs', type=int, default=20,
                         help="Number of training epochs")
-    parser.add_argument('--batch-size', type=int, default=64,
+    parser.add_argument('--batch-size', type=int, default=256,
                         help="Batch size for training")
     parser.add_argument('--lr', type=float, default=1e-4,
                         help="Learning rate")
     parser.add_argument('--gamma', type=float, default=0.99,
                         help="Discount factor")
     parser.add_argument('--device', type=str, default='cpu',
-                        help="Device to use (cpu or cuda)")
+                        help="Device to use (cpu, cuda, or mps)")
     parser.add_argument('--output', type=str, required=True,
                         help="Output path for trained model")
     parser.add_argument('--save-data', type=str, default=None,
-                        help="Path to save collected dataset (optional)")
+                        help="Path to save collected transitions (optional)")
     parser.add_argument('--load-data', type=str, default=None,
-                        help="Path to load pre-collected dataset (optional)")
+                        help="Path to load pre-collected transitions (optional)")
     parser.add_argument('--init-model', type=str, default=None,
                         help="Path to pretrained model to continue training from (optional)")
+    parser.add_argument('--target-update', type=int, default=5,
+                        help="Update target network every N epochs")
 
     args = parser.parse_args()
 
-    print("Supervised Training with Mixed Teacher")
+    print("Supervised Training with Iterative Q-Learning")
     print("=" * 50)
 
     device = torch.device(args.device)
 
     # Load or collect data
     if args.load_data:
-        print(f"\nLoading dataset from {args.load_data}...")
+        print(f"\nLoading transitions from {args.load_data}...")
         with open(args.load_data, 'rb') as f:
-            data = pickle.load(f)
-            states_empty = data['states_empty']
-            states_filled = data['states_filled']
-            actions = data['actions']
-            q_targets = data['q_targets']
-        print(f"Loaded {len(actions)} samples")
+            transitions = pickle.load(f)
+        print(f"Loaded {len(transitions)} transitions")
     else:
         # Create environment and teacher
         env = tetris.Tetris()
         teacher = MixedTeacherAgent()
 
-        # Collect rollouts
-        print(f"\nCollecting {args.num_episodes} episodes with mixed teacher...")
-        states_empty, states_filled, actions, q_targets = collect_rollouts(
-            teacher, env, args.num_episodes, args.gamma
-        )
+        # Collect transitions
+        print(f"\nCollecting {args.num_episodes} episodes with teacher...")
+        transitions = collect_transitions(teacher, env, args.num_episodes)
 
         # Optionally save dataset
         if args.save_data:
-            print(f"\nSaving dataset to {args.save_data}...")
-            data = {
-                'states_empty': states_empty,
-                'states_filled': states_filled,
-                'actions': actions,
-                'q_targets': q_targets,
-            }
+            print(f"\nSaving transitions to {args.save_data}...")
             output_dir = os.path.dirname(args.save_data)
             if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
             with open(args.save_data, 'wb') as f:
-                pickle.dump(data, f)
-            print(f"Dataset saved!")
+                pickle.dump(transitions, f)
+            print(f"Transitions saved!")
 
-    # Create and train model
+    # Create model
     model = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
 
     # Load pretrained weights if provided
@@ -282,8 +271,8 @@ def main():
             model.load_state_dict(checkpoint)
         print("Model loaded successfully!")
 
-    train_value_network(model, states_empty, states_filled, actions, q_targets,
-                       args, device)
+    # Train model
+    train_value_network(model, transitions, args, device)
 
 
 if __name__ == '__main__':
