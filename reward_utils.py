@@ -283,4 +283,7 @@ def compute_heuristic_normalized_reward(old_board, new_board, active_piece, line
     line_bonus_map = {0: 0.0, 1: 1.0, 2: 2.0, 3: 4.0, 4: 8.0}
     line_bonus = line_bonus_map.get(lines_cleared, 0.0)
 
-    return normalized_reward + line_bonus
+    total_reward = normalized_reward + line_bonus
+
+    # Clip reward to prevent destabilization
+    return np.clip(total_reward, -10.0, +10.0)

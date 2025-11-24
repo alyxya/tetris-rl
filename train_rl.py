@@ -191,8 +191,8 @@ def train_value_rl(args):
                     next_q_max = next_q_values.max(1)[0]
                     q_target = batch_rewards + args.gamma * next_q_max * (1 - batch_dones)
 
-                # Compute loss
-                loss = F.mse_loss(q_pred, q_target)
+                # Compute loss (Huber loss is more robust to outliers than MSE)
+                loss = F.smooth_l1_loss(q_pred, q_target)
                 episode_losses.append(loss.item())
 
                 # Backward pass
@@ -213,6 +213,22 @@ def train_value_rl(args):
         if episode % 10 == 0:
             avg_loss = sum(episode_losses) / len(episode_losses) if episode_losses else 0
             print(f"\nEpisode {episode} - Steps: {steps}, Reward: {total_reward:.2f}, Loss: {avg_loss:.4f}, Epsilon: {epsilon:.3f}, Temp: {temperature:.3f}")
+
+        # Monitor Q-value statistics every 50 episodes
+        if episode % 50 == 0 and len(replay_buffer) >= args.batch_size:
+            # Sample a batch to check Q-value magnitudes
+            sample_empty, sample_filled, _, _, _, _, _ = replay_buffer.sample(min(256, len(replay_buffer)))
+            sample_empty = torch.FloatTensor(sample_empty).unsqueeze(1).to(device)
+            sample_filled = torch.FloatTensor(sample_filled).unsqueeze(1).to(device)
+
+            with torch.no_grad():
+                sample_q = online_net(sample_empty, sample_filled)
+                q_mean = sample_q.mean().item()
+                q_std = sample_q.std().item()
+                q_min = sample_q.min().item()
+                q_max = sample_q.max().item()
+
+            print(f"  Q-value stats: mean={q_mean:+.2f}, std={q_std:.2f}, range=[{q_min:+.2f}, {q_max:+.2f}]")
 
         # Save model at regular intervals
         if episode % args.save_interval == 0 and episode > 0:
@@ -258,7 +274,7 @@ def main():
                         help="Initial epsilon (value mode)")
     parser.add_argument('--epsilon-end', type=float, default=0.01,
                         help="Final epsilon (value mode)")
-    parser.add_argument('--target-update', type=int, default=2,
+    parser.add_argument('--target-update', type=int, default=20,
                         help="Target network update frequency (value mode)")
     parser.add_argument('--temperature-start', type=float, default=None,
                         help="Initial temperature for Boltzmann exploration (default: 0.0)")
