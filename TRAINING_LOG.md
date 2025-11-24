@@ -277,34 +277,34 @@ python train_supervised_mixed.py \
 # Train on v1 dataset with shaped rewards (from scratch)
 python train_supervised_mixed.py \
     --load-data data/supervised_dataset_v1.pkl \
-    --output models/supervised_value_v6_from_v1.pth \
+    --output models/supervised_value_from_v1.pth \
     --epochs 5 \
     --shaped-rewards \
     --device mps
 
 # Continue with v2 dataset
 python train_supervised_mixed.py \
-    --init-model models/supervised_value_v6_from_v1.pth \
+    --init-model models/supervised_value_from_v1.pth \
     --load-data data/supervised_dataset_v2.pkl \
-    --output models/supervised_value_v6_from_v2.pth \
+    --output models/supervised_value_from_v2.pth \
     --epochs 5 \
     --shaped-rewards \
     --device mps
 
 # Continue with v3 dataset
 python train_supervised_mixed.py \
-    --init-model models/supervised_value_v6_from_v2.pth \
+    --init-model models/supervised_value_from_v2.pth \
     --load-data data/supervised_dataset_v3.pkl \
-    --output models/supervised_value_v6_from_v3.pth \
+    --output models/supervised_value_from_v3.pth \
     --epochs 5 \
     --shaped-rewards \
     --device mps
 
 # Continue with v4 dataset (final)
 python train_supervised_mixed.py \
-    --init-model models/supervised_value_v6_from_v3.pth \
+    --init-model models/supervised_value_from_v3.pth \
     --load-data data/supervised_dataset_v4.pkl \
-    --output models/supervised_value_v6.pth \
+    --output models/supervised_value.pth \
     --epochs 5 \
     --shaped-rewards \
     --device mps
