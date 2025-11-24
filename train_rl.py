@@ -19,7 +19,7 @@ from pufferlib.ocean.tetris import tetris
 
 from model import ValueNetwork
 from value_agent import ValueAgent
-from reward_utils import compute_lines_cleared, compute_simple_reward, compute_shaped_reward
+from reward_utils import compute_lines_cleared, compute_simple_reward, compute_shaped_reward, compute_heuristic_normalized_reward
 
 
 class ReplayBuffer:
@@ -53,7 +53,12 @@ class ReplayBuffer:
 
 def train_value_rl(args):
     """Train value network with Q-learning using shaped rewards."""
-    reward_type = "Shaped" if args.shaped_rewards else "Simple"
+    if args.heuristic_rewards:
+        reward_type = "Heuristic Normalized"
+    elif args.shaped_rewards:
+        reward_type = "Shaped"
+    else:
+        reward_type = "Simple"
     print(f"Training Value Network with Q-Learning ({reward_type} Rewards)")
     print("=" * 50)
 
@@ -128,10 +133,24 @@ def train_value_rl(args):
                 _, next_locked, next_active = agent.parse_observation(next_obs_single)
                 lines_cleared = compute_lines_cleared(locked, active, next_locked)
 
-                if args.shaped_rewards:
-                    reward = compute_shaped_reward(board_empty, next_locked, lines_cleared)
+                # Check if piece locked (active piece disappeared or changed)
+                piece_locked = np.sum(active > 0) > 0 and np.sum(next_active > 0) == 0
+
+                if args.heuristic_rewards and piece_locked:
+                    # Use heuristic normalized reward for piece placements
+                    # Compares the actual placement against all possible placements
+                    reward = compute_heuristic_normalized_reward(
+                        board_empty, next_locked, active, lines_cleared
+                    )
+                elif piece_locked:
+                    # Piece locked, compute reward based on reward type
+                    if args.shaped_rewards:
+                        reward = compute_shaped_reward(board_empty, next_locked, lines_cleared)
+                    else:
+                        reward = compute_simple_reward(lines_cleared)
                 else:
-                    reward = compute_simple_reward(lines_cleared)
+                    # Piece didn't lock, no reward
+                    reward = 0.0
 
             next_empty = next_locked.copy()
             next_filled = next_locked.copy()
@@ -243,6 +262,8 @@ def main():
                         help="Final temperature for Boltzmann exploration (default: 0.0)")
     parser.add_argument('--shaped-rewards', action='store_true',
                         help="Use shaped rewards instead of simple line-clear rewards")
+    parser.add_argument('--heuristic-rewards', action='store_true',
+                        help="Use heuristic normalized rewards (compares placement against all possibilities)")
 
     args = parser.parse_args()
 

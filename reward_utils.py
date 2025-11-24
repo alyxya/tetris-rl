@@ -1,6 +1,7 @@
 """Utility functions for computing rewards."""
 
 import numpy as np
+import heuristic
 
 
 ACTION_NO_OP = 0
@@ -182,3 +183,95 @@ def compute_shaped_reward(old_board, new_board, lines_cleared):
     # If new_sum_sq > old_sum_sq (height increased), reward is negative
     # Scaled by 0.1 to make values more manageable for learning
     return (old_sum_sq - new_sum_sq) * 0.1
+
+
+def compute_heuristic_normalized_reward(old_board, new_board, active_piece, lines_cleared):
+    """
+    Compute reward based on heuristic evaluation of placement quality.
+
+    This provides dense feedback by comparing the chosen placement against all possible placements:
+    1. Enumerate all possible placements (rotations × columns) for the current piece
+    2. Score each placement using the heuristic function
+    3. Find which placement matches the actual result (new_board)
+    4. Normalize: reward = (chosen_score - mean_score) / std_score
+    5. Add line clear bonus
+
+    This solves the sparse reward problem by giving meaningful feedback for positioning moves,
+    not just HARD_DROP.
+
+    Args:
+        old_board: 2D numpy array, previous board state (locked cells only)
+        new_board: 2D numpy array, new board state after piece locked
+        active_piece: 2D numpy array, active piece before locking
+        lines_cleared: int, number of lines cleared (0-4)
+
+    Returns:
+        reward: float, normalized placement quality + line clear bonus
+    """
+    # Extract piece shape from active_piece board
+    piece_positions = np.argwhere(active_piece > 0)
+    if len(piece_positions) == 0:
+        return 0.0  # No piece visible
+
+    # Get bounding box of piece
+    min_row, min_col = piece_positions.min(axis=0)
+    max_row, max_col = piece_positions.max(axis=0)
+    piece_shape = active_piece[min_row:max_row+1, min_col:max_col+1].copy()
+
+    # Heuristic weights (same as HeuristicAgent)
+    weights = {
+        'lines': 10.0,
+        'height': 0.0,
+        'aggregate_height': -0.51,
+        'holes': -0.36,
+        'bumpiness': -0.18,
+    }
+
+    # Enumerate all possible placements and find the one that matches new_board
+    n_cols = old_board.shape[1]
+    all_scores = []
+    chosen_score = None
+
+    for rot in range(4):
+        rotated_shape = piece_shape.copy()
+        for _ in range(rot):
+            rotated_shape = heuristic.rotate_piece_cw(rotated_shape)
+
+        piece_width = rotated_shape.shape[1]
+
+        for col in range(n_cols - piece_width + 1):
+            score, _ = heuristic.evaluate_placement(old_board, piece_shape, rot, col, weights)
+            if score > float('-inf'):  # Valid placement
+                all_scores.append(score)
+
+                # Check if this placement matches the actual result
+                if chosen_score is None:
+                    simulated_board, _, _ = heuristic.simulate_drop(old_board, rotated_shape, col)
+                    if simulated_board is not None and np.array_equal(simulated_board, new_board):
+                        chosen_score = score
+
+    if len(all_scores) == 0:
+        return 0.0  # No valid placements
+
+    if chosen_score is None:
+        # Couldn't match the placement - use a fallback approach
+        # This can happen if lines were cleared (new_board has fewer filled cells)
+        # In this case, just use average score
+        chosen_score = np.mean(all_scores)
+
+    # Normalize: center around 0, scale to std=1
+    all_scores = np.array(all_scores)
+    mean_score = np.mean(all_scores)
+    std_score = np.std(all_scores)
+
+    if std_score < 1e-6:
+        # All placements have same score, this placement is average
+        normalized_reward = 0.0
+    else:
+        normalized_reward = (chosen_score - mean_score) / std_score
+
+    # Add line clear bonus
+    line_bonus_map = {0: 0.0, 1: 1.0, 2: 2.0, 3: 4.0, 4: 8.0}
+    line_bonus = line_bonus_map.get(lines_cleared, 0.0)
+
+    return normalized_reward + line_bonus
