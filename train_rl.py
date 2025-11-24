@@ -96,6 +96,7 @@ def train_value_rl(args):
         done = False
         total_reward = 0
         steps = 0
+        episode_losses = []
 
         while not done:
             # Extract single observation from batch
@@ -169,6 +170,7 @@ def train_value_rl(args):
 
                 # Compute loss
                 loss = F.mse_loss(q_pred, q_target)
+                episode_losses.append(loss.item())
 
                 # Backward pass
                 optimizer.zero_grad()
@@ -186,7 +188,8 @@ def train_value_rl(args):
 
         # Logging
         if episode % 10 == 0:
-            print(f"\nEpisode {episode} - Steps: {steps}, Reward: {total_reward:.2f}, Epsilon: {epsilon:.3f}, Temp: {temperature:.3f}")
+            avg_loss = sum(episode_losses) / len(episode_losses) if episode_losses else 0
+            print(f"\nEpisode {episode} - Steps: {steps}, Reward: {total_reward:.2f}, Loss: {avg_loss:.4f}, Epsilon: {epsilon:.3f}, Temp: {temperature:.3f}")
 
         # Save model at regular intervals
         if episode % args.save_interval == 0 and episode > 0:
