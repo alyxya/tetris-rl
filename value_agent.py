@@ -27,7 +27,7 @@ class ValueAgent(BaseAgent):
         super().__init__(n_rows, n_cols)
 
         self.device = torch.device(device)
-        self.model = ValueNetwork(n_rows, n_cols, n_actions=7).to(self.device)
+        self.model = ValueNetwork(n_rows, n_cols, n_actions=6).to(self.device)
         self.model.eval()
 
         if model_path is not None:
@@ -43,11 +43,11 @@ class ValueAgent(BaseAgent):
             temperature: Temperature for Boltzmann sampling (0 = greedy, higher = more exploration)
 
         Returns:
-            action: Selected action (0-6)
+            action: Selected action (0-5) - excludes HOLD
         """
         # Epsilon-greedy exploration
         if np.random.random() < epsilon:
-            return np.random.randint(0, 7)
+            return np.random.randint(0, 6)
 
         # Get Q-values
         q_values = self.get_q_values(obs)
@@ -73,7 +73,7 @@ class ValueAgent(BaseAgent):
             obs: Flattened observation
 
         Returns:
-            q_values: Numpy array of Q-values (7,)
+            q_values: Numpy array of Q-values (6,) - excludes HOLD
         """
         board_empty, board_filled = self.prepare_board_inputs(obs)
 

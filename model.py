@@ -41,7 +41,7 @@ class SharedCNN(nn.Module):
 class ValueNetwork(nn.Module):
     """Value network that outputs Q-values for each action."""
 
-    def __init__(self, n_rows=20, n_cols=10, n_actions=7):
+    def __init__(self, n_rows=20, n_cols=10, n_actions=6):
         super().__init__()
 
         self.n_actions = n_actions
@@ -63,7 +63,7 @@ class ValueNetwork(nn.Module):
             board_filled: Board with locked + active piece (Bx1x20x10)
 
         Returns:
-            q_values: Q-value for each action (Bx7)
+            q_values: Q-value for each action (Bx6) - excludes HOLD action
         """
         features_empty = self.cnn(board_empty)
         features_filled = self.cnn(board_filled)

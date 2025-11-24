@@ -93,7 +93,11 @@ def train_value_network(model, transitions, args, device):
         args: Training arguments
         device: torch device
     """
-    print(f"\nDataset size: {len(transitions)} transitions")
+    print(f"\nDataset size (before filtering): {len(transitions)} transitions")
+
+    # Filter out HOLD actions (action 6) since model only supports 6 actions
+    transitions = [t for t in transitions if t[2] != 6]
+    print(f"Dataset size (after filtering HOLD): {len(transitions)} transitions")
 
     # Convert transitions to arrays for batching
     states_empty = np.array([t[0] for t in transitions])
@@ -136,7 +140,7 @@ def train_value_network(model, transitions, args, device):
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # Create target network for stable Q-learning
-    target_model = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
+    target_model = ValueNetwork(n_rows=20, n_cols=10, n_actions=6).to(device)
     target_model.load_state_dict(model.state_dict())
     target_model.eval()
 
@@ -283,8 +287,8 @@ def main():
                 pickle.dump(transitions, f)
             print(f"Transitions saved!")
 
-    # Create model
-    model = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
+    # Create model (6 actions: NO_OP, LEFT, RIGHT, ROTATE, SOFT_DROP, HARD_DROP - excludes HOLD)
+    model = ValueNetwork(n_rows=20, n_cols=10, n_actions=6).to(device)
 
     # Load pretrained weights if provided
     if args.init_model:

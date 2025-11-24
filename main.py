@@ -79,9 +79,13 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed
 
             if q_values is not None:
                 print(f"    Q-values by action:")
-                for act in range(7):
+                num_actions = len(q_values)
+                for act in range(num_actions):
                     marker = " <--" if act == action else ""
                     print(f"      {ACTION_NAMES[act]:>10s}: {q_values[act]:+.6f}{marker}")
+                # Note if HOLD is excluded
+                if num_actions == 6:
+                    print(f"      {ACTION_NAMES[6]:>10s}: (excluded from model)")
 
         if render:
             env.render()
