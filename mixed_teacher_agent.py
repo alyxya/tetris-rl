@@ -39,11 +39,11 @@ class MixedTeacherAgent(BaseAgent):
         Reset agent state for new episode.
 
         Samples new random_prob and heuristic_temperature:
-        - random_prob = (uniform(0, 1))^5
+        - random_prob = 0.0 (no random actions)
         - heuristic_temperature = 0.0 (greedy)
         """
         # Sample per-episode parameters
-        self.random_prob = np.random.uniform(0, 1) ** 5
+        self.random_prob = 0.0
         self.heuristic_temperature = 0.0
 
         # Create heuristic agent with sampled temperature
