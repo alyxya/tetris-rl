@@ -279,8 +279,8 @@ def compute_heuristic_normalized_reward(old_board, new_board, active_piece, line
     else:
         normalized_reward = (chosen_score - mean_score) / std_score - 0.5
 
-    # Add line clear bonus (scaled up 2x)
-    line_bonus_map = {0: 0.0, 1: 2.0, 2: 4.0, 3: 8.0, 4: 16.0}
+    # Add line clear bonus
+    line_bonus_map = {0: 0.0, 1: 1.0, 2: 2.0, 3: 4.0, 4: 8.0}
     line_bonus = line_bonus_map.get(lines_cleared, 0.0)
 
     return normalized_reward + line_bonus
