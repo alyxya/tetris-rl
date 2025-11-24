@@ -218,14 +218,10 @@ def compute_heuristic_normalized_reward(old_board, new_board, active_piece, line
     max_row, max_col = piece_positions.max(axis=0)
     piece_shape = active_piece[min_row:max_row+1, min_col:max_col+1].copy()
 
-    # Heuristic weights (same as HeuristicAgent)
-    weights = {
-        'lines': 10.0,
-        'height': 0.0,
-        'aggregate_height': -0.51,
-        'holes': -0.36,
-        'bumpiness': -0.18,
-    }
+    # Simple heuristic: negative sum of squared heights
+    # Lower sum of squares = better placement
+    # Line clears reduce heights, so they naturally score better
+    weights = None  # Not used anymore, we'll compute directly
 
     # Enumerate all possible placements and find the one that matches new_board
     n_cols = old_board.shape[1]
@@ -240,15 +236,18 @@ def compute_heuristic_normalized_reward(old_board, new_board, active_piece, line
         piece_width = rotated_shape.shape[1]
 
         for col in range(n_cols - piece_width + 1):
-            score, _ = heuristic.evaluate_placement(old_board, piece_shape, rot, col, weights)
-            if score > float('-inf'):  # Valid placement
+            # Simulate placement and compute negative sum of squared heights
+            simulated_board, _, _ = heuristic.simulate_drop(old_board, rotated_shape, col)
+            if simulated_board is not None:
+                heights = heuristic.get_column_heights(simulated_board)
+                sum_sq = sum(h * h for h in heights)
+                score = -sum_sq  # Negative because lower is better
+
                 all_scores.append(score)
 
                 # Check if this placement matches the actual result
-                if chosen_score is None:
-                    simulated_board, _, _ = heuristic.simulate_drop(old_board, rotated_shape, col)
-                    if simulated_board is not None and np.array_equal(simulated_board, new_board):
-                        chosen_score = score
+                if chosen_score is None and np.array_equal(simulated_board, new_board):
+                    chosen_score = score
 
     if len(all_scores) == 0:
         return 0.0  # No valid placements
@@ -259,17 +258,17 @@ def compute_heuristic_normalized_reward(old_board, new_board, active_piece, line
         # In this case, just use average score
         chosen_score = np.mean(all_scores)
 
-    # Normalize: center around -1 (shifted), scale to std=1
+    # Normalize: center around -0.5 (shifted), scale to std=1
     # This makes positive rewards require better-than-average placements
     all_scores = np.array(all_scores)
     mean_score = np.mean(all_scores)
     std_score = np.std(all_scores)
 
     if std_score < 1e-6:
-        # All placements have same score, this placement is average (shifted to -1)
-        normalized_reward = -1.0
+        # All placements have same score, this placement is average (shifted to -0.5)
+        normalized_reward = -0.5
     else:
-        normalized_reward = (chosen_score - mean_score) / std_score - 1.0
+        normalized_reward = (chosen_score - mean_score) / std_score - 0.5
 
     # Add line clear bonus
     line_bonus_map = {0: 0.0, 1: 1.0, 2: 2.0, 3: 4.0, 4: 8.0}
