@@ -194,13 +194,12 @@ python train_supervised_mixed.py \
 - Gamma: 0.99
 - Target network update: Every 5 epochs
 - Device: mps
-- **Initialized from:** models/supervised_value_v4.pth
+- **Initialized from:** Random weights (fresh start, not from v4)
 
 **Commands:**
 ```bash
-# Train on v1 dataset with shaped rewards
+# Train on v1 dataset with shaped rewards (from scratch)
 python train_supervised_mixed.py \
-    --init-model models/supervised_value_v4.pth \
     --load-data data/supervised_dataset_v1.pkl \
     --output models/supervised_value_v5_from_v1.pth \
     --epochs 5 \
@@ -242,6 +241,7 @@ python train_supervised_mixed.py \
 - **Dense feedback**: Every piece placement gets shaped reward based on board quality
 - **Research-backed coefficients**: Based on successful Tetris DRL implementations
 - **No new data needed**: Computes shaped rewards from existing board states
+- **Fresh start**: Training from scratch (not from v4) to learn shaped reward value function cleanly
 - **Expected improvement**: Q-values should be more differentiated, better policy learning
 
 ---
