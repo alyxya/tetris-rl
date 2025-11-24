@@ -153,58 +153,31 @@ def compute_bumpiness(heights):
 
 def compute_shaped_reward(old_board, new_board, lines_cleared):
     """
-    Compute shaped reward using board state features and line clears.
+    Compute shaped reward using only squared height penalty.
 
-    Reward = f(new_board) - f(old_board) + line_clear_bonus
+    Reward = -sum(new_heights²) + sum(old_heights²)
 
-    Where f(board) penalizes:
-    - Aggregate height (sum of column heights SQUARED - quadratic penalty)
-    - Holes (empty cells below filled cells)
-    - Bumpiness (unevenness of surface)
-
-    Weights:
-    - Aggregate height (quadratic): -0.5 (10x stronger to discourage tall stacks)
-    - Holes: -0.36
-    - Bumpiness: -0.18
-    - Line bonuses: {1: 1.0, 2: 3.0, 3: 5.0, 4: 10.0}
+    Simple and clean: any action that reduces sum of squared heights gets positive reward.
+    Clearing lines reduces height, so gets rewarded implicitly.
+    Stacking high gets heavily penalized due to quadratic growth.
 
     Args:
         old_board: 2D numpy array, previous board state (locked cells only)
         new_board: 2D numpy array, new board state (locked cells only)
-        lines_cleared: int, number of lines cleared (0-4)
+        lines_cleared: int, number of lines cleared (0-4) - not used
 
     Returns:
-        reward: float
+        reward: float (negative change in sum of squared heights)
     """
-    # Compute features for both boards
+    # Compute heights for both boards
     old_heights = compute_column_heights(old_board)
     new_heights = compute_column_heights(new_board)
 
-    old_holes = compute_holes(old_board)
-    new_holes = compute_holes(new_board)
+    # Compute sum of squares
+    old_sum_sq = sum(h * h for h in old_heights)
+    new_sum_sq = sum(h * h for h in new_heights)
 
-    old_bumpiness = compute_bumpiness(old_heights)
-    new_bumpiness = compute_bumpiness(new_heights)
-
-    # State evaluation function f(board)
-    def f(heights, holes, bumpiness):
-        # Quadratic height penalty: sum of squares
-        aggregate_height_sq = sum(h * h for h in heights)
-        return -0.5 * aggregate_height_sq - 0.36 * holes - 0.18 * bumpiness
-
-    # Differential reward
-    old_value = f(old_heights, old_holes, old_bumpiness)
-    new_value = f(new_heights, new_holes, new_bumpiness)
-    shape_reward = new_value - old_value
-
-    # Line clear bonus (scaled up from simple rewards)
-    line_bonus_map = {
-        0: 0.0,
-        1: 1.0,
-        2: 3.0,
-        3: 5.0,
-        4: 10.0,
-    }
-    line_bonus = line_bonus_map.get(lines_cleared, 0.0)
-
-    return shape_reward + line_bonus
+    # Reward = reduction in sum of squares (negative change)
+    # If new_sum_sq < old_sum_sq (height decreased), reward is positive
+    # If new_sum_sq > old_sum_sq (height increased), reward is negative
+    return old_sum_sq - new_sum_sq

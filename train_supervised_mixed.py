@@ -55,10 +55,10 @@ def collect_transitions(agent, env, num_episodes):
             next_obs, _, terminated, truncated, _ = env.step([action])
             done = terminated[0] or truncated[0]
 
-            # Compute reward based on line clears
+            # Compute reward based on board state change
             if done:
-                # Death penalty (board state is invalid)
-                reward = -1.0
+                # No reward on death (board state is invalid, and Bellman target masks this anyway)
+                reward = 0.0
                 # Use dummy next state (won't be used due to done=True)
                 next_empty = board_empty.copy()
                 next_filled = board_filled.copy()
@@ -117,7 +117,7 @@ def train_value_network(model, transitions, args, device):
             done = transitions[i][6]
 
             if done:
-                reward = -1.0  # Death penalty
+                reward = 0.0  # No reward on death
             else:
                 # Extract active piece to compute lines cleared
                 old_filled = transitions[i][1]  # state_filled

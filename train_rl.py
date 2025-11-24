@@ -112,8 +112,8 @@ def train_value_rl(args):
 
             # Compute reward
             if done:
-                # Death penalty
-                reward = -1.0
+                # No reward on death (board state invalid)
+                reward = 0.0
                 # Parse next state for storing in buffer
                 next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
                 _, next_locked, next_active = agent.parse_observation(next_obs_single)

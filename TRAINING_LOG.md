@@ -254,16 +254,14 @@ python train_supervised_mixed.py \
 - HOLD action (action 6) completely removed from model architecture
 - Training automatically filters out all action=6 transitions from datasets
 
-**Reward Structure: SHAPED REWARDS + DEATH PENALTY + QUADRATIC HEIGHT**
-- **Aggregate height penalty (QUADRATIC): -0.5 × sum(h² for h in column_heights)**
-  - Exponentially penalizes tall columns (height 15 → -11250 vs height 5 → -1250)
-  - 10x stronger than previous to strongly discourage side-stacking
-  - Discourages dangerous tall stacks
-- Holes penalty: -0.36 × total_holes
-- Bumpiness penalty: -0.18 × sum(|height_diff|)
-- Line clear bonuses: {1: 1.0, 2: 3.0, 3: 5.0, 4: 10.0}
-- **Death penalty: -1.0**
-- Total reward: f(new_board) - f(old_board) + line_bonus (or -1.0 if episode ends)
+**Reward Structure: PURE QUADRATIC HEIGHT**
+- **Reward = sum(old_heights²) - sum(new_heights²)**
+- Simple and clean: reward any action that reduces sum of squared heights
+- Line clears implicitly rewarded (they reduce height)
+- Stacking high heavily penalized due to quadratic growth
+- No death penalty (Bellman equation handles terminal states with done flag)
+- No explicit line bonuses (implicit through height reduction)
+- No holes/bumpiness penalties (focusing on single clear objective)
 
 **Training Configuration:**
 - Reuses existing v1-v4 datasets (computes shaped rewards on-the-fly, filters HOLD actions)
