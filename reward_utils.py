@@ -259,16 +259,17 @@ def compute_heuristic_normalized_reward(old_board, new_board, active_piece, line
         # In this case, just use average score
         chosen_score = np.mean(all_scores)
 
-    # Normalize: center around 0, scale to std=1
+    # Normalize: center around -1 (shifted), scale to std=1
+    # This makes positive rewards require better-than-average placements
     all_scores = np.array(all_scores)
     mean_score = np.mean(all_scores)
     std_score = np.std(all_scores)
 
     if std_score < 1e-6:
-        # All placements have same score, this placement is average
-        normalized_reward = 0.0
+        # All placements have same score, this placement is average (shifted to -1)
+        normalized_reward = -1.0
     else:
-        normalized_reward = (chosen_score - mean_score) / std_score
+        normalized_reward = (chosen_score - mean_score) / std_score - 1.0
 
     # Add line clear bonus
     line_bonus_map = {0: 0.0, 1: 1.0, 2: 2.0, 3: 4.0, 4: 8.0}
