@@ -60,6 +60,8 @@ def train_value_rl(args):
     else:
         reward_type = "Simple"
     print(f"Training Value Network with Q-Learning ({reward_type} Rewards)")
+    if args.death_penalty > 0:
+        print(f"Death Penalty: -{args.death_penalty}")
     print("=" * 50)
 
     device = torch.device(args.device)
@@ -122,8 +124,8 @@ def train_value_rl(args):
 
             # Compute reward
             if done:
-                # No reward on death (board state invalid)
-                reward = 0.0
+                # Apply death penalty (defaults to 0.0)
+                reward = -args.death_penalty
                 # Parse next state for storing in buffer
                 next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
                 _, next_locked, next_active = agent.parse_observation(next_obs_single)
@@ -284,6 +286,8 @@ def main():
                         help="Use shaped rewards instead of simple line-clear rewards")
     parser.add_argument('--heuristic-rewards', action='store_true',
                         help="Use heuristic normalized rewards (compares placement against all possibilities)")
+    parser.add_argument('--death-penalty', type=float, default=0.0,
+                        help="Penalty applied when agent dies (default: 0.0 for no penalty)")
 
     args = parser.parse_args()
 
