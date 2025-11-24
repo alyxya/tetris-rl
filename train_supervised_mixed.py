@@ -57,8 +57,8 @@ def collect_transitions(agent, env, num_episodes):
 
             # Compute reward based on line clears
             if done:
-                # No reward on death (board state is invalid)
-                reward = 0.0
+                # Death penalty (board state is invalid)
+                reward = -1.0
                 # Use dummy next state (won't be used due to done=True)
                 next_empty = board_empty.copy()
                 next_filled = board_filled.copy()
@@ -117,7 +117,7 @@ def train_value_network(model, transitions, args, device):
             done = transitions[i][6]
 
             if done:
-                reward = 0.0  # No reward on episode end
+                reward = -1.0  # Death penalty
             else:
                 # Extract active piece to compute lines cleared
                 old_filled = transitions[i][1]  # state_filled

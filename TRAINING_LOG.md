@@ -320,6 +320,82 @@ python train_supervised_mixed.py \
 
 ---
 
+### v7 (Current)
+**Date:** 2025-01-24
+
+**Major Change: 6-Action Model (Excludes HOLD)**
+- Model outputs only 6 Q-values: NO_OP, LEFT, RIGHT, ROTATE, SOFT_DROP, HARD_DROP
+- HOLD action (action 6) completely removed from model architecture
+- Training automatically filters out all action=6 transitions from datasets
+
+**Reward Structure: SHAPED REWARDS + DEATH PENALTY**
+- Aggregate height penalty: -0.51 × sum(column_heights)
+- Holes penalty: -0.36 × total_holes
+- Bumpiness penalty: -0.18 × sum(|height_diff|)
+- Line clear bonuses: {1: 1.0, 2: 3.0, 3: 5.0, 4: 10.0}
+- **Death penalty: -1.0** (new!)
+- Total reward: f(new_board) - f(old_board) + line_bonus (or -1.0 if episode ends)
+
+**Training Configuration:**
+- Reuses existing v1-v4 datasets (computes shaped rewards on-the-fly, filters HOLD actions)
+- Train on v1 data (5 epochs) → v2 data (5 epochs) → v3 data (5 epochs) → v4 data (5 epochs)
+- Batch size: 256
+- Learning rate: 1e-4
+- Gamma: 0.99
+- Target network update: Every 5 epochs
+- Device: mps
+- **Initialized from:** Random weights (fresh start)
+
+**Commands:**
+```bash
+# Train on v1 dataset with shaped rewards (from scratch)
+python train_supervised_mixed.py \
+    --load-data data/supervised_dataset_v1.pkl \
+    --output models/supervised_value_v7_from_v1.pth \
+    --epochs 5 \
+    --shaped-rewards \
+    --device mps
+
+# Continue with v2 dataset
+python train_supervised_mixed.py \
+    --init-model models/supervised_value_v7_from_v1.pth \
+    --load-data data/supervised_dataset_v2.pkl \
+    --output models/supervised_value_v7_from_v2.pth \
+    --epochs 5 \
+    --shaped-rewards \
+    --device mps
+
+# Continue with v3 dataset
+python train_supervised_mixed.py \
+    --init-model models/supervised_value_v7_from_v2.pth \
+    --load-data data/supervised_dataset_v3.pkl \
+    --output models/supervised_value_v7_from_v3.pth \
+    --epochs 5 \
+    --shaped-rewards \
+    --device mps
+
+# Continue with v4 dataset (final)
+python train_supervised_mixed.py \
+    --init-model models/supervised_value_v7_from_v3.pth \
+    --load-data data/supervised_dataset_v4.pkl \
+    --output models/supervised_value_v7.pth \
+    --epochs 5 \
+    --shaped-rewards \
+    --device mps
+```
+
+**Status:** Ready to train
+
+**Notes:**
+- **Rationale for removing HOLD**: Simplifies action space, HOLD action rarely used effectively by heuristic teacher
+- **Rationale for death penalty**: Discourage risky play that leads to game over, help agent learn to avoid terminal states
+- **Dataset filtering**: Automatically removes action=6 transitions during training (expect ~5-10% data loss)
+- **Model architecture change**: Output layer now 128→6 instead of 128→7
+- **Incompatible with v1-v6 weights**: Cannot initialize from previous models due to different reward structure/architecture
+- **Expected benefits**: Simpler policy, faster training, focus on core Tetris mechanics, better survival
+
+---
+
 ## Historical Notes
 
 **Pre-v1 (Deprecated):**
