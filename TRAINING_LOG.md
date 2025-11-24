@@ -126,11 +126,50 @@ python train_supervised_mixed.py \
     --device mps
 ```
 
-**Status:** Training in progress
+**Status:** Completed
+
+**Results:**
+- [Add results after testing]
 
 **Notes:**
 - Continue training v2 with even less exploration (power 5 = ~17%)
 - More deterministic heuristic guidance
+
+---
+
+### v4 (Current)
+**Date:** 2025-01-23
+
+**Teacher Configuration:**
+- `random_prob = (uniform(0,1))^4` (E[random_prob] = 0.20)
+- `temperature = 0.0` (greedy heuristic)
+
+**Training Configuration:**
+- Episodes: 1000 (new dataset)
+- Epochs: 5
+- Batch size: 256
+- Learning rate: 1e-4
+- Gamma: 0.99
+- Target network update: Every 5 epochs
+- Device: mps
+- **Initialized from:** models/supervised_value_v3.pth
+
+**Command:**
+```bash
+python train_supervised_mixed.py \
+    --init-model models/supervised_value_v3.pth \
+    --num-episodes 1000 \
+    --output models/supervised_value_v4.pth \
+    --save-data data/supervised_dataset_v4.pkl \
+    --epochs 5 \
+    --device mps
+```
+
+**Status:** Training in progress
+
+**Notes:**
+- Continue training v3 with greedy heuristic (temp=0)
+- Only source of randomness is random action probability (~20%)
 
 ---
 
