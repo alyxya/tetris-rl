@@ -163,7 +163,7 @@ def compute_shaped_reward(old_board, new_board, lines_cleared):
     - Bumpiness (unevenness of surface)
 
     Weights:
-    - Aggregate height (quadratic): -0.05 (tuned for sum of squares)
+    - Aggregate height (quadratic): -0.5 (10x stronger to discourage tall stacks)
     - Holes: -0.36
     - Bumpiness: -0.18
     - Line bonuses: {1: 1.0, 2: 3.0, 3: 5.0, 4: 10.0}
@@ -190,7 +190,7 @@ def compute_shaped_reward(old_board, new_board, lines_cleared):
     def f(heights, holes, bumpiness):
         # Quadratic height penalty: sum of squares
         aggregate_height_sq = sum(h * h for h in heights)
-        return -0.05 * aggregate_height_sq - 0.36 * holes - 0.18 * bumpiness
+        return -0.5 * aggregate_height_sq - 0.36 * holes - 0.18 * bumpiness
 
     # Differential reward
     old_value = f(old_heights, old_holes, old_bumpiness)
