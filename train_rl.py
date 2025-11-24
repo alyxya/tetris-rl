@@ -133,8 +133,12 @@ def train_value_rl(args):
                 _, next_locked, next_active = agent.parse_observation(next_obs_single)
                 lines_cleared = compute_lines_cleared(locked, active, next_locked)
 
-                # Check if piece locked (active piece disappeared or changed)
-                piece_locked = np.sum(active > 0) > 0 and np.sum(next_active > 0) == 0
+                # Check if piece locked by comparing locked board changes
+                # If locked board gained blocks, a piece was placed
+                old_filled_count = np.sum(locked > 0)
+                new_filled_count = np.sum(next_locked > 0)
+                piece_locked = new_filled_count > old_filled_count or lines_cleared > 0
+
 
                 if args.heuristic_rewards and piece_locked:
                     # Use heuristic normalized reward for piece placements
