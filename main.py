@@ -15,7 +15,7 @@ from heuristic_agent import HeuristicAgent
 from value_agent import ValueAgent
 from hybrid_agent import HybridAgent
 from mixed_teacher_agent import MixedTeacherAgent
-from reward_utils import compute_lines_cleared, compute_simple_reward, compute_shaped_reward, compute_column_heights, ACTION_NAMES
+from reward_utils import compute_lines_cleared, compute_simple_reward, compute_shaped_reward, compute_heuristic_normalized_reward, compute_column_heights, ACTION_NAMES
 
 
 def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed=None):
@@ -55,43 +55,41 @@ def run_episode(env, agent, render=False, verbose=True, show_rewards=False, seed
 
         # Show rewards if requested
         if show_rewards and hasattr(agent, 'parse_observation'):
-            # Compute reward (0 if episode ended)
+            # Compute reward
             if done:
-                lines_cleared = 0
                 reward = 0.0
-                old_heights = compute_column_heights(locked)
-                new_heights = old_heights  # dummy
             else:
                 next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
-                _, next_locked, _ = agent.parse_observation(next_obs_single)
+                _, next_locked, next_active = agent.parse_observation(next_obs_single)
                 lines_cleared = compute_lines_cleared(locked, active, next_locked)
 
-                # Compute both simple and shaped rewards
-                simple_reward = compute_simple_reward(lines_cleared)
-                shaped_reward = compute_shaped_reward(locked, next_locked, lines_cleared)
-                reward = shaped_reward
+                # Check if piece locked
+                piece_locked = np.sum(active > 0) > 0 and np.sum(next_active > 0) == 0
 
-                # Get height info
-                old_heights = compute_column_heights(locked)
-                new_heights = compute_column_heights(next_locked)
+                if piece_locked:
+                    # Compute heuristic normalized reward
+                    reward = compute_heuristic_normalized_reward(locked, next_locked, active, lines_cleared)
+                else:
+                    # No piece lock, no reward
+                    reward = 0.0
 
             # Get Q-values if this is a value agent
             q_values = None
             if hasattr(agent, 'get_q_values'):
                 q_values = agent.get_q_values(obs_single)
 
+            # Print action and reward
             if done:
                 print(f"\n  Step {steps}: Action={ACTION_NAMES[action]} (Episode ended)")
             else:
-                old_sum_sq = sum(h*h for h in old_heights)
-                new_sum_sq = sum(h*h for h in new_heights)
-                print(f"\n  Step {steps}: Action={ACTION_NAMES[action]}")
-                print(f"    Heights: {old_heights} -> {new_heights}")
-                print(f"    Sum(h²): {old_sum_sq} -> {new_sum_sq} (Δ={new_sum_sq - old_sum_sq:+.0f})")
-                print(f"    Reward: {reward:+.2f} (lines cleared: {lines_cleared})")
+                if reward != 0.0:
+                    print(f"\n  Step {steps}: Action={ACTION_NAMES[action]} | Reward: {reward:+.3f} (piece locked)")
+                else:
+                    print(f"\n  Step {steps}: Action={ACTION_NAMES[action]} | Reward: 0.000 (positioning)")
 
+            # Print Q-values
             if q_values is not None:
-                print(f"    Q-values by action:")
+                print(f"    Q-values:")
                 num_actions = len(q_values)
                 for act in range(num_actions):
                     marker = " <--" if act == action else ""
