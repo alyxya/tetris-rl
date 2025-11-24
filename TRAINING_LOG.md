@@ -255,8 +255,9 @@ python train_supervised_mixed.py \
 - Training automatically filters out all action=6 transitions from datasets
 
 **Reward Structure: SHAPED REWARDS + DEATH PENALTY + QUADRATIC HEIGHT**
-- **Aggregate height penalty (QUADRATIC): -0.51 × sum(h² for h in column_heights)**
-  - Exponentially penalizes tall columns (height 15 → 225 penalty vs height 5 → 25 penalty)
+- **Aggregate height penalty (QUADRATIC): -0.05 × sum(h² for h in column_heights)**
+  - Exponentially penalizes tall columns (height 15 → -1125 vs height 5 → -125)
+  - Similar strength to linear for moderate heights, much stronger for tall stacks
   - Discourages dangerous side-stacking strategies
 - Holes penalty: -0.36 × total_holes
 - Bumpiness penalty: -0.18 × sum(|height_diff|)
