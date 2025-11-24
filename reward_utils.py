@@ -237,11 +237,20 @@ def compute_heuristic_normalized_reward(old_board, new_board, active_piece, line
 
         for col in range(n_cols - piece_width + 1):
             # Simulate placement and compute negative sum of squared heights
-            simulated_board, _, _ = heuristic.simulate_drop(old_board, rotated_shape, col)
+            simulated_board, lines, _ = heuristic.simulate_drop(old_board, rotated_shape, col)
             if simulated_board is not None:
                 heights = heuristic.get_column_heights(simulated_board)
                 sum_sq = sum(h * h for h in heights)
-                score = -sum_sq  # Negative because lower is better
+
+                # Adjust for line clears: each line cleared reduces height by 1 for all columns
+                # Approximate the reduction in sum of squares
+                if lines > 0:
+                    # After clearing lines, all columns reduce by 'lines' rows
+                    adjusted_heights = [max(0, h - lines) for h in heights]
+                    adjusted_sum_sq = sum(h * h for h in adjusted_heights)
+                    score = -adjusted_sum_sq
+                else:
+                    score = -sum_sq  # Negative because lower is better
 
                 all_scores.append(score)
 
