@@ -48,11 +48,50 @@ python train_supervised_mixed.py \
     --device mps
 ```
 
-**Status:** Training in progress
+**Status:** Completed
+
+**Results:**
+- [Add results after testing]
 
 **Notes:**
 - First model trained with correct iterative Q-learning approach
 - Power of 3 provides good balance: ~25% exploration, ~75% heuristic guidance
+
+---
+
+### v2 (Current)
+**Date:** 2025-01-23
+
+**Teacher Configuration:**
+- `random_prob = (uniform(0,1))^4` (E[random_prob] = 0.20)
+- `temperature = (uniform(0,1))^4` (E[temperature] = 0.20)
+
+**Training Configuration:**
+- Episodes: 1000 (new dataset)
+- Epochs: 5
+- Batch size: 256
+- Learning rate: 1e-4
+- Gamma: 0.99
+- Target network update: Every 5 epochs
+- Device: mps
+- **Initialized from:** models/supervised_value_v1.pth
+
+**Command:**
+```bash
+python train_supervised_mixed.py \
+    --init-model models/supervised_value_v1.pth \
+    --num-episodes 1000 \
+    --output models/supervised_value_v2.pth \
+    --save-data data/supervised_dataset_v2.pkl \
+    --epochs 5 \
+    --device mps
+```
+
+**Status:** Training in progress
+
+**Notes:**
+- Continue training v1 with less exploration (power 4 = 20% vs 25%)
+- Collect fresh dataset with more greedy heuristic guidance
 
 ---
 
