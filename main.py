@@ -190,7 +190,7 @@ def main():
     elif args.agent == 'mixed':
         agent = MixedTeacherAgent()
         print(f"Running MixedTeacherAgent for {args.episodes} episode(s)...")
-        print(f"  Random prob & temperature: (uniform(0,1))^5 per episode")
+        print(f"  Random prob & temperature: (uniform(0,1))^3 per episode")
 
     else:
         raise ValueError(f"Unknown agent: {args.agent}")
