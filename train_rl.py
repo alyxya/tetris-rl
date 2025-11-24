@@ -19,7 +19,7 @@ from pufferlib.ocean.tetris import tetris
 
 from model import ValueNetwork
 from value_agent import ValueAgent
-from reward_utils import compute_lines_cleared, compute_simple_reward
+from reward_utils import compute_lines_cleared, compute_simple_reward, compute_shaped_reward
 
 
 class ReplayBuffer:
@@ -52,16 +52,17 @@ class ReplayBuffer:
 
 
 def train_value_rl(args):
-    """Train value network with Q-learning using simple rewards."""
-    print("Training Value Network with Q-Learning (Simple Rewards)")
+    """Train value network with Q-learning using shaped rewards."""
+    reward_type = "Shaped" if args.shaped_rewards else "Simple"
+    print(f"Training Value Network with Q-Learning ({reward_type} Rewards)")
     print("=" * 50)
 
     device = torch.device(args.device)
     env = tetris.Tetris()
 
-    # Create online and target networks
-    online_net = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
-    target_net = ValueNetwork(n_rows=20, n_cols=10, n_actions=7).to(device)
+    # Create online and target networks (6 actions - no HOLD)
+    online_net = ValueNetwork(n_rows=20, n_cols=10, n_actions=6).to(device)
+    target_net = ValueNetwork(n_rows=20, n_cols=10, n_actions=6).to(device)
 
     # Load pretrained weights if provided
     if args.init_model:
@@ -109,10 +110,10 @@ def train_value_rl(args):
             next_obs, _, terminated, truncated, _ = env.step([action])
             done = terminated[0] or truncated[0]
 
-            # Compute simple reward based only on line clears
+            # Compute reward
             if done:
-                # No reward on death (board state is invalid)
-                reward = 0.0
+                # Death penalty
+                reward = -1.0
                 # Parse next state for storing in buffer
                 next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
                 _, next_locked, next_active = agent.parse_observation(next_obs_single)
@@ -121,7 +122,11 @@ def train_value_rl(args):
                 next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
                 _, next_locked, next_active = agent.parse_observation(next_obs_single)
                 lines_cleared = compute_lines_cleared(locked, active, next_locked)
-                reward = compute_simple_reward(lines_cleared)
+
+                if args.shaped_rewards:
+                    reward = compute_shaped_reward(board_empty, next_locked, lines_cleared)
+                else:
+                    reward = compute_simple_reward(lines_cleared)
 
             next_empty = next_locked.copy()
             next_filled = next_locked.copy()
@@ -226,6 +231,8 @@ def main():
                         help="Target network update frequency (value mode)")
     parser.add_argument('--temperature', type=float, default=None,
                         help="Sampling temperature (default: 0.0 for value)")
+    parser.add_argument('--shaped-rewards', action='store_true',
+                        help="Use shaped rewards instead of simple line-clear rewards")
 
     args = parser.parse_args()
 
