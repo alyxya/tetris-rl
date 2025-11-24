@@ -83,6 +83,11 @@ def train_value_rl(args):
     epsilon = args.epsilon_start
     epsilon_decay = (args.epsilon_start - args.epsilon_end) / args.num_episodes
 
+    # Temperature decay
+    temperature = args.temperature_start if args.temperature_start is not None else 0.0
+    temperature_end = args.temperature_end if args.temperature_end is not None else 0.0
+    temperature_decay = (temperature - temperature_end) / args.num_episodes
+
     agent = ValueAgent(device=args.device)
     agent.model = online_net
 
@@ -103,7 +108,6 @@ def train_value_rl(args):
             board_filled[active > 0] = 1.0
 
             # Epsilon-greedy action selection with temperature
-            temperature = args.temperature if args.temperature is not None else 0.0
             action = agent.choose_action(obs_single, epsilon=epsilon, temperature=temperature)
 
             # Take step
@@ -176,12 +180,13 @@ def train_value_rl(args):
         if episode % args.target_update == 0:
             target_net.load_state_dict(online_net.state_dict())
 
-        # Decay epsilon
+        # Decay epsilon and temperature
         epsilon = max(args.epsilon_end, epsilon - epsilon_decay)
+        temperature = max(temperature_end, temperature - temperature_decay)
 
         # Logging
         if episode % 10 == 0:
-            print(f"\nEpisode {episode} - Steps: {steps}, Reward: {total_reward:.2f}, Epsilon: {epsilon:.3f}")
+            print(f"\nEpisode {episode} - Steps: {steps}, Reward: {total_reward:.2f}, Epsilon: {epsilon:.3f}, Temp: {temperature:.3f}")
 
         # Save model at regular intervals
         if episode % args.save_interval == 0 and episode > 0:
@@ -229,8 +234,10 @@ def main():
                         help="Final epsilon (value mode)")
     parser.add_argument('--target-update', type=int, default=2,
                         help="Target network update frequency (value mode)")
-    parser.add_argument('--temperature', type=float, default=None,
-                        help="Sampling temperature (default: 0.0 for value)")
+    parser.add_argument('--temperature-start', type=float, default=None,
+                        help="Initial temperature for Boltzmann exploration (default: 0.0)")
+    parser.add_argument('--temperature-end', type=float, default=None,
+                        help="Final temperature for Boltzmann exploration (default: 0.0)")
     parser.add_argument('--shaped-rewards', action='store_true',
                         help="Use shaped rewards instead of simple line-clear rewards")
 
