@@ -268,7 +268,7 @@ python train_supervised_mixed.py \
 - Train on v1 data (5 epochs) → v2 data (5 epochs) → v3 data (5 epochs) → v4 data (5 epochs)
 - Batch size: 256
 - Learning rate: 1e-4
-- Gamma: 0.99
+- Gamma: 0.999 (high discount for long-term planning)
 - Target network update: Every 5 epochs
 - Device: mps
 - **Initialized from:** Random weights (fresh start)

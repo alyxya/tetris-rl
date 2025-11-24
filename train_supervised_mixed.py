@@ -238,7 +238,7 @@ def main():
                         help="Batch size for training")
     parser.add_argument('--lr', type=float, default=1e-4,
                         help="Learning rate")
-    parser.add_argument('--gamma', type=float, default=0.99,
+    parser.add_argument('--gamma', type=float, default=0.999,
                         help="Discount factor")
     parser.add_argument('--device', type=str, default='cpu',
                         help="Device to use (cpu, cuda, or mps)")
