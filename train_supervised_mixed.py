@@ -19,7 +19,7 @@ from pufferlib.ocean.tetris import tetris
 
 from model import ValueNetwork
 from mixed_teacher_agent import MixedTeacherAgent
-from reward_utils import compute_lines_cleared, compute_simple_reward
+from reward_utils import compute_lines_cleared, compute_simple_reward, compute_shaped_reward
 
 
 def collect_transitions(agent, env, num_episodes):
@@ -95,19 +95,42 @@ def train_value_network(model, transitions, args, device):
     """
     print(f"\nDataset size: {len(transitions)} transitions")
 
-    # Analyze reward distribution
-    rewards = [t[3] for t in transitions]
-    print(f"Reward stats: mean={np.mean(rewards):.4f}, "
-          f"nonzero={100*np.mean(np.array(rewards) > 0):.1f}%")
-
     # Convert transitions to arrays for batching
     states_empty = np.array([t[0] for t in transitions])
     states_filled = np.array([t[1] for t in transitions])
     actions = np.array([t[2] for t in transitions])
-    rewards = np.array([t[3] for t in transitions])
     next_empty = np.array([t[4] for t in transitions])
     next_filled = np.array([t[5] for t in transitions])
     dones = np.array([t[6] for t in transitions])
+
+    # Compute rewards on-the-fly based on --shaped-rewards flag
+    if args.shaped_rewards:
+        print("Computing shaped rewards from board states...")
+        rewards = []
+        for i in tqdm(range(len(transitions)), desc="Computing rewards"):
+            old_board = transitions[i][0]  # state_empty
+            new_board = transitions[i][4]  # next_empty
+            done = transitions[i][6]
+
+            if done:
+                reward = 0.0  # No reward on episode end
+            else:
+                # Extract active piece to compute lines cleared
+                old_filled = transitions[i][1]  # state_filled
+                active_piece = old_filled - old_board
+                # Compute lines cleared
+                lines = compute_lines_cleared(old_board, active_piece, new_board)
+                # Compute shaped reward
+                reward = compute_shaped_reward(old_board, new_board, lines)
+
+            rewards.append(reward)
+        rewards = np.array(rewards)
+        print(f"Shaped reward stats: mean={np.mean(rewards):.4f}, std={np.std(rewards):.4f}")
+    else:
+        # Use stored simple rewards
+        rewards = np.array([t[3] for t in transitions])
+        print(f"Simple reward stats: mean={np.mean(rewards):.4f}, "
+              f"nonzero={100*np.mean(rewards > 0):.1f}%")
 
     # Setup optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -225,6 +248,8 @@ def main():
                         help="Path to pretrained model to continue training from (optional)")
     parser.add_argument('--target-update', type=int, default=5,
                         help="Update target network every N epochs")
+    parser.add_argument('--shaped-rewards', action='store_true',
+                        help="Use shaped rewards (height, holes, bumpiness) instead of simple line-clear rewards")
 
     args = parser.parse_args()
 

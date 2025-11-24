@@ -165,11 +165,84 @@ python train_supervised_mixed.py \
     --device mps
 ```
 
-**Status:** Training in progress
+**Status:** Completed
+
+**Results:**
+- [Add results after testing]
 
 **Notes:**
 - Continue training v3 with greedy heuristic (temp=0)
 - Only source of randomness is random action probability (~20%)
+
+---
+
+### v5 (Current)
+**Date:** 2025-01-23
+
+**Reward Structure: SHAPED REWARDS** (Major Change)
+- **Aggregate height penalty**: -0.51 × sum(column_heights)
+- **Holes penalty**: -0.36 × total_holes
+- **Bumpiness penalty**: -0.18 × sum(|height_diff|)
+- **Line clear bonuses**: {1: 1.0, 2: 3.0, 3: 5.0, 4: 10.0}
+- **Total reward**: f(new_board) - f(old_board) + line_bonus
+
+**Training Configuration:**
+- **Reuses existing v1-v4 datasets** (computes shaped rewards on-the-fly)
+- Train on v1 data (5 epochs) → v2 data (5 epochs) → v3 data (5 epochs) → v4 data (5 epochs)
+- Batch size: 256
+- Learning rate: 1e-4
+- Gamma: 0.99
+- Target network update: Every 5 epochs
+- Device: mps
+- **Initialized from:** models/supervised_value_v4.pth
+
+**Commands:**
+```bash
+# Train on v1 dataset with shaped rewards
+python train_supervised_mixed.py \
+    --init-model models/supervised_value_v4.pth \
+    --load-data data/supervised_dataset_v1.pkl \
+    --output models/supervised_value_v5_from_v1.pth \
+    --epochs 5 \
+    --shaped-rewards \
+    --device mps
+
+# Continue with v2 dataset
+python train_supervised_mixed.py \
+    --init-model models/supervised_value_v5_from_v1.pth \
+    --load-data data/supervised_dataset_v2.pkl \
+    --output models/supervised_value_v5_from_v2.pth \
+    --epochs 5 \
+    --shaped-rewards \
+    --device mps
+
+# Continue with v3 dataset
+python train_supervised_mixed.py \
+    --init-model models/supervised_value_v5_from_v2.pth \
+    --load-data data/supervised_dataset_v3.pkl \
+    --output models/supervised_value_v5_from_v3.pth \
+    --epochs 5 \
+    --shaped-rewards \
+    --device mps
+
+# Continue with v4 dataset (final)
+python train_supervised_mixed.py \
+    --init-model models/supervised_value_v5_from_v3.pth \
+    --load-data data/supervised_dataset_v4.pkl \
+    --output models/supervised_value_v5.pth \
+    --epochs 5 \
+    --shaped-rewards \
+    --device mps
+```
+
+**Status:** Ready to train
+
+**Notes:**
+- **Solves sparse reward problem**: 92.65% of actions had reward=0 with simple rewards
+- **Dense feedback**: Every piece placement gets shaped reward based on board quality
+- **Research-backed coefficients**: Based on successful Tetris DRL implementations
+- **No new data needed**: Computes shaped rewards from existing board states
+- **Expected improvement**: Q-values should be more differentiated, better policy learning
 
 ---
 
