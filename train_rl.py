@@ -104,6 +104,7 @@ def train_value_rl(args):
         total_reward = 0
         steps = 0
         episode_losses = []
+        total_lines_cleared = 0
 
         while not done:
             # Extract single observation from batch
@@ -134,6 +135,10 @@ def train_value_rl(args):
                 next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
                 _, next_locked, next_active = agent.parse_observation(next_obs_single)
                 lines_cleared = compute_lines_cleared(locked, active, next_locked)
+
+                # Track total lines cleared in episode
+                if lines_cleared > 0:
+                    total_lines_cleared += lines_cleared
 
                 # Check if piece locked by comparing locked board changes
                 # If locked board gained blocks, a piece was placed
@@ -214,7 +219,13 @@ def train_value_rl(args):
         # Logging
         if episode % 10 == 0:
             avg_loss = sum(episode_losses) / len(episode_losses) if episode_losses else 0
-            print(f"\nEpisode {episode} - Steps: {steps}, Reward: {total_reward:.2f}, Loss: {avg_loss:.4f}, Epsilon: {epsilon:.3f}, Temp: {temperature:.3f}")
+            lines_info = f", Lines: {total_lines_cleared}" if total_lines_cleared > 0 else ""
+            print(f"\nEpisode {episode} - Steps: {steps}, Reward: {total_reward:.2f}, Loss: {avg_loss:.4f}, Epsilon: {epsilon:.3f}, Temp: {temperature:.3f}{lines_info}")
+
+        # Log any episode with line clears immediately (not just every 10)
+        elif total_lines_cleared > 0:
+            avg_loss = sum(episode_losses) / len(episode_losses) if episode_losses else 0
+            print(f"\n🎉 Episode {episode} - Steps: {steps}, Reward: {total_reward:.2f}, Loss: {avg_loss:.4f}, Lines: {total_lines_cleared}")
 
         # Monitor Q-value statistics every 50 episodes
         if episode % 50 == 0 and len(replay_buffer) >= args.batch_size:
