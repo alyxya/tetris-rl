@@ -99,6 +99,9 @@ def train_value_network(model, transitions, args, device):
     transitions = [t for t in transitions if t[2] != 6]
     print(f"Dataset size (after filtering HOLD): {len(transitions)} transitions")
 
+    # Check if transitions have active piece info (new format) or not (old format)
+    has_active_piece = len(transitions[0]) == 8
+
     # Convert transitions to arrays for batching
     states_empty = np.array([t[0] for t in transitions])
     states_filled = np.array([t[1] for t in transitions])
@@ -106,7 +109,13 @@ def train_value_network(model, transitions, args, device):
     next_empty = np.array([t[4] for t in transitions])
     next_filled = np.array([t[5] for t in transitions])
     dones = np.array([t[6] for t in transitions])
-    active_pieces = [t[7] for t in transitions]  # Keep as list for now
+
+    if has_active_piece:
+        active_pieces = [t[7] for t in transitions]
+    else:
+        # Old format: extract active piece from state_filled - state_empty
+        print("Old dataset format detected - extracting active pieces from states...")
+        active_pieces = [transitions[i][1] - transitions[i][0] for i in range(len(transitions))]
 
     # Compute rewards based on flags (matching RL training)
     print("Computing rewards from board states...")
@@ -115,7 +124,7 @@ def train_value_network(model, transitions, args, device):
         old_board = transitions[i][0]  # state_empty
         new_board = transitions[i][4]  # next_empty
         done = transitions[i][6]
-        active_piece = transitions[i][7]
+        active_piece = active_pieces[i]
 
         if done:
             # Apply death penalty (matching RL)
