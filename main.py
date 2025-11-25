@@ -15,6 +15,7 @@ from heuristic_agent import HeuristicAgent
 from value_agent import ValueAgent
 from hybrid_agent import HybridAgent
 from mixed_teacher_agent import MixedTeacherAgent
+from monte_carlo_agent import MonteCarloAgent
 from reward_utils import compute_lines_cleared, compute_simple_reward, compute_shaped_reward, compute_heuristic_normalized_reward, compute_column_heights, ACTION_NAMES
 
 
@@ -119,7 +120,7 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Run Tetris agents')
     parser.add_argument('--agent', type=str, required=True,
-                        choices=['heuristic', 'value', 'hybrid', 'mixed'],
+                        choices=['heuristic', 'value', 'hybrid', 'mixed', 'monte_carlo'],
                         help='Agent type to use')
     parser.add_argument('--model-path', type=str, default=None,
                         help='Path to model weights (for value agent)')
@@ -149,6 +150,16 @@ def main():
                         help='Comma-separated probabilities for hybrid agents (must sum to 1.0)')
     parser.add_argument('--value-model', type=str, default=None,
                         help='Model path for value agent in hybrid')
+
+    # Monte Carlo agent options
+    parser.add_argument('--num-rollouts', type=int, default=20,
+                        help='Number of Monte Carlo rollouts per action (default: 20)')
+    parser.add_argument('--rollout-depth', type=int, default=10,
+                        help='Maximum depth of each rollout (default: 10)')
+    parser.add_argument('--mc-temperature', type=float, default=0.1,
+                        help='Temperature for action sampling in Monte Carlo rollouts (default: 0.1)')
+    parser.add_argument('--mc-epsilon', type=float, default=0.1,
+                        help='Epsilon for random exploration in Monte Carlo rollouts (default: 0.1)')
 
     args = parser.parse_args()
 
@@ -211,6 +222,35 @@ def main():
         agent = MixedTeacherAgent()
         print(f"Running MixedTeacherAgent for {args.episodes} episode(s)...")
         print(f"  Random prob & temperature: (uniform(0,1))^3 per episode")
+
+    elif args.agent == 'monte_carlo':
+        if not args.model_path:
+            print("Warning: No model path provided, using randomly initialized model")
+        agent = MonteCarloAgent(
+            device=args.device,
+            num_rollouts=args.num_rollouts,
+            rollout_depth=args.rollout_depth,
+            temperature=args.mc_temperature,
+            epsilon=args.mc_epsilon
+        )
+        # Load model
+        if args.model_path:
+            import torch
+            from model import ValueNetwork
+            model = ValueNetwork(n_rows=20, n_cols=10, n_actions=6).to(args.device)
+            checkpoint = torch.load(args.model_path, map_location=args.device, weights_only=False)
+            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+            else:
+                model.load_state_dict(checkpoint)
+            model.eval()
+            agent.model = model
+
+        print(f"Running MonteCarloAgent for {args.episodes} episode(s)...")
+        if args.model_path:
+            print(f"  Loaded model from {args.model_path}")
+        print(f"  Rollouts: {args.num_rollouts}, Depth: {args.rollout_depth}")
+        print(f"  MC Temperature: {args.mc_temperature}, MC Epsilon: {args.mc_epsilon}")
 
     else:
         raise ValueError(f"Unknown agent: {args.agent}")
