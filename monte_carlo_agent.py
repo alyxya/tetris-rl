@@ -160,12 +160,12 @@ class MonteCarloAgent(ValueAgent):
 
         Returns:
             action_sequence: list of actions taken
-            max_q_value: maximum Q-value encountered during rollout
+            avg_q_value: average Q-value encountered during rollout
         """
         current_locked = locked.copy()
         current_active = active.copy()
         action_sequence = []
-        max_q_value = float('-inf')
+        q_values_seen = []
 
         for _ in range(self.rollout_depth):
             # Prepare observation for Q-value computation
@@ -180,9 +180,9 @@ class MonteCarloAgent(ValueAgent):
             with torch.no_grad():
                 q_values = self.model(state_empty, state_filled)[0].cpu().numpy()
 
-            # Track max Q-value (only for rollout actions)
+            # Track Q-values (only for rollout actions)
             rollout_q_values = q_values[self.rollout_actions]
-            max_q_value = max(max_q_value, np.max(rollout_q_values))
+            q_values_seen.append(np.max(rollout_q_values))
 
             # Sample action with temperature and epsilon-greedy
             if np.random.random() < self.epsilon:
@@ -214,13 +214,15 @@ class MonteCarloAgent(ValueAgent):
                 with torch.no_grad():
                     final_q_values = self.model(final_state_empty, final_state_filled)[0].cpu().numpy()
 
-                max_q_value = max(max_q_value, np.max(final_q_values))
+                q_values_seen.append(np.max(final_q_values))
                 break
 
             current_locked = new_locked
             current_active = new_active
 
-        return action_sequence, max_q_value
+        # Compute average Q-value
+        avg_q_value = np.mean(q_values_seen) if len(q_values_seen) > 0 else float('-inf')
+        return action_sequence, avg_q_value
 
     def choose_action(self, obs, epsilon=0.0, temperature=0.0):
         """
@@ -238,14 +240,14 @@ class MonteCarloAgent(ValueAgent):
 
         # Perform multiple rollouts
         best_action = None
-        best_q_value = float('-inf')
+        best_avg_q = float('-inf')
 
         for _ in range(self.num_rollouts):
-            action_sequence, max_q_value = self.rollout(locked, active)
+            action_sequence, avg_q_value = self.rollout(locked, active)
 
-            # If this rollout has better max Q-value, use its first action
-            if max_q_value > best_q_value and len(action_sequence) > 0:
-                best_q_value = max_q_value
+            # If this rollout has better average Q-value, use its first action
+            if avg_q_value > best_avg_q and len(action_sequence) > 0:
+                best_avg_q = avg_q_value
                 best_action = action_sequence[0]
 
         # Fallback to random rollout action if no rollouts succeeded
