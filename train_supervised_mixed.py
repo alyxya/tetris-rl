@@ -19,7 +19,7 @@ from pufferlib.ocean.tetris import tetris
 
 from model import ValueNetwork
 from mixed_teacher_agent import MixedTeacherAgent
-from reward_utils import compute_lines_cleared, compute_simple_reward, compute_shaped_reward
+from reward_utils import compute_lines_cleared, compute_simple_reward, compute_shaped_reward, compute_heuristic_normalized_reward
 
 
 def collect_transitions(agent, env, num_episodes):
@@ -56,26 +56,26 @@ def collect_transitions(agent, env, num_episodes):
             done = terminated[0] or truncated[0]
 
             # Compute reward based on board state change
+            # Note: Reward computation is deferred to training time based on flags
+            # Here we just store placeholder reward and compute actual reward later
             if done:
-                # No reward on death (board state is invalid, and Bellman target masks this anyway)
-                reward = 0.0
+                reward = 0.0  # Placeholder - will be replaced with death penalty during training
                 # Use dummy next state (won't be used due to done=True)
                 next_empty = board_empty.copy()
                 next_filled = board_filled.copy()
             else:
-                # Get next state to compute reward
+                # Get next state
                 next_obs_single = next_obs[0] if len(next_obs.shape) > 1 else next_obs
                 _, next_locked, next_active = agent.parse_observation(next_obs_single)
-                lines_cleared = compute_lines_cleared(locked, active, next_locked)
-                reward = compute_simple_reward(lines_cleared)
+                reward = 0.0  # Placeholder - will be computed during training
 
                 # Store next state
                 next_empty = next_locked.copy()
                 next_filled = next_locked.copy()
                 next_filled[next_active > 0] = 1.0
 
-            # Store transition
-            transitions.append((board_empty, board_filled, action, reward, next_empty, next_filled, done))
+            # Store transition with active piece info for reward computation
+            transitions.append((board_empty, board_filled, action, reward, next_empty, next_filled, done, active))
 
             # Move to next state
             obs = next_obs
@@ -106,35 +106,47 @@ def train_value_network(model, transitions, args, device):
     next_empty = np.array([t[4] for t in transitions])
     next_filled = np.array([t[5] for t in transitions])
     dones = np.array([t[6] for t in transitions])
+    active_pieces = [t[7] for t in transitions]  # Keep as list for now
 
-    # Compute rewards on-the-fly based on --shaped-rewards flag
-    if args.shaped_rewards:
-        print("Computing shaped rewards from board states...")
-        rewards = []
-        for i in tqdm(range(len(transitions)), desc="Computing rewards"):
-            old_board = transitions[i][0]  # state_empty
-            new_board = transitions[i][4]  # next_empty
-            done = transitions[i][6]
+    # Compute rewards based on flags (matching RL training)
+    print("Computing rewards from board states...")
+    rewards = []
+    for i in tqdm(range(len(transitions)), desc="Computing rewards"):
+        old_board = transitions[i][0]  # state_empty
+        new_board = transitions[i][4]  # next_empty
+        done = transitions[i][6]
+        active_piece = transitions[i][7]
 
-            if done:
-                reward = 0.0  # No reward on death
+        if done:
+            # Apply death penalty (matching RL)
+            reward = -args.death_penalty
+        else:
+            # Compute lines cleared
+            lines = compute_lines_cleared(old_board, active_piece, new_board)
+
+            # Check if piece locked (matching RL logic)
+            old_filled_count = np.sum(old_board > 0)
+            new_filled_count = np.sum(new_board > 0)
+            piece_locked = new_filled_count > old_filled_count or lines > 0
+
+            if args.heuristic_rewards and piece_locked:
+                # Use heuristic normalized reward (matching RL)
+                reward = compute_heuristic_normalized_reward(old_board, new_board, active_piece, lines)
+            elif piece_locked:
+                # Use shaped or simple rewards
+                if args.shaped_rewards:
+                    reward = compute_shaped_reward(old_board, new_board, lines)
+                else:
+                    reward = compute_simple_reward(lines)
             else:
-                # Extract active piece to compute lines cleared
-                old_filled = transitions[i][1]  # state_filled
-                active_piece = old_filled - old_board
-                # Compute lines cleared
-                lines = compute_lines_cleared(old_board, active_piece, new_board)
-                # Compute shaped reward
-                reward = compute_shaped_reward(old_board, new_board, lines)
+                # Piece didn't lock
+                reward = 0.0
 
-            rewards.append(reward)
-        rewards = np.array(rewards)
-        print(f"Shaped reward stats: mean={np.mean(rewards):.4f}, std={np.std(rewards):.4f}")
-    else:
-        # Use stored simple rewards
-        rewards = np.array([t[3] for t in transitions])
-        print(f"Simple reward stats: mean={np.mean(rewards):.4f}, "
-              f"nonzero={100*np.mean(rewards > 0):.1f}%")
+        rewards.append(reward)
+
+    rewards = np.array(rewards)
+    print(f"Reward stats: mean={np.mean(rewards):.4f}, std={np.std(rewards):.4f}, "
+          f"min={np.min(rewards):.4f}, max={np.max(rewards):.4f}")
 
     # Setup optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -182,8 +194,8 @@ def train_value_network(model, transitions, args, device):
                 next_q_max = next_q_values.max(1)[0]
                 q_target = batch_rewards + args.gamma * next_q_max * (1 - batch_dones)
 
-            # Compute loss
-            loss = F.mse_loss(q_pred, q_target)
+            # Compute loss (Huber loss is more robust to outliers than MSE, matching RL)
+            loss = F.smooth_l1_loss(q_pred, q_target)
 
             # Backward pass
             optimizer.zero_grad()
@@ -238,8 +250,8 @@ def main():
                         help="Batch size for training")
     parser.add_argument('--lr', type=float, default=1e-4,
                         help="Learning rate")
-    parser.add_argument('--gamma', type=float, default=0.999,
-                        help="Discount factor")
+    parser.add_argument('--gamma', type=float, default=0.99,
+                        help="Discount factor (matching RL default)")
     parser.add_argument('--device', type=str, default='cpu',
                         help="Device to use (cpu, cuda, or mps)")
     parser.add_argument('--output', type=str, required=True,
@@ -254,6 +266,10 @@ def main():
                         help="Update target network every N epochs")
     parser.add_argument('--shaped-rewards', action='store_true',
                         help="Use shaped rewards (height, holes, bumpiness) instead of simple line-clear rewards")
+    parser.add_argument('--heuristic-rewards', action='store_true',
+                        help="Use heuristic normalized rewards (compares placement against all possibilities, matching RL)")
+    parser.add_argument('--death-penalty', type=float, default=0.0,
+                        help="Penalty applied when agent dies (default: 0.0, matching RL when specified)")
 
     args = parser.parse_args()
 
