@@ -15,6 +15,7 @@ from collections import deque
 from tqdm import tqdm
 import time
 import os
+import pickle
 from pufferlib.ocean.tetris import tetris
 
 from model import ValueNetwork
@@ -85,6 +86,18 @@ def train_value_rl(args):
 
     optimizer = optim.Adam(online_net.parameters(), lr=args.lr)
     replay_buffer = ReplayBuffer(args.buffer_size)
+
+    # Load supervised data if provided (for mixed replay buffer)
+    supervised_transitions = []
+    if args.supervised_data:
+        print(f"\nLoading supervised data from {args.supervised_data}...")
+        with open(args.supervised_data, 'rb') as f:
+            supervised_transitions = pickle.load(f)
+
+        # Filter out HOLD actions
+        supervised_transitions = [t for t in supervised_transitions if t[2] != 6]
+        print(f"Loaded {len(supervised_transitions)} supervised transitions")
+        print(f"Will inject with probability {args.supervised_prob:.2%} per training step")
 
     # Training loop
     epsilon = args.epsilon_start
@@ -173,6 +186,47 @@ def train_value_rl(args):
             total_reward += reward
             steps += 1
             obs = next_obs
+
+            # Probabilistically inject supervised transition
+            if supervised_transitions and np.random.random() < args.supervised_prob:
+                # Sample random supervised transition
+                sup_t = supervised_transitions[np.random.randint(len(supervised_transitions))]
+
+                # Extract components
+                sup_state_empty = sup_t[0]
+                sup_state_filled = sup_t[1]
+                sup_action = sup_t[2]
+                sup_next_empty = sup_t[4]
+                sup_next_filled = sup_t[5]
+                sup_done = sup_t[6]
+
+                # Extract active piece (handle both old and new format)
+                if len(sup_t) == 8:
+                    sup_active_piece = sup_t[7]
+                else:
+                    sup_active_piece = sup_state_filled - sup_state_empty
+
+                # Recompute reward using current reward settings
+                if sup_done:
+                    sup_reward = -args.death_penalty
+                else:
+                    sup_lines = compute_lines_cleared(sup_state_empty, sup_active_piece, sup_next_empty)
+                    sup_old_filled = np.sum(sup_state_empty > 0)
+                    sup_new_filled = np.sum(sup_next_empty > 0)
+                    sup_piece_locked = sup_new_filled > sup_old_filled or sup_lines > 0
+
+                    if args.heuristic_rewards and sup_piece_locked:
+                        sup_reward = compute_heuristic_normalized_reward(sup_state_empty, sup_next_empty, sup_active_piece, sup_lines)
+                    elif sup_piece_locked:
+                        if args.shaped_rewards:
+                            sup_reward = compute_shaped_reward(sup_state_empty, sup_next_empty, sup_lines)
+                        else:
+                            sup_reward = compute_simple_reward(sup_lines)
+                    else:
+                        sup_reward = 0.0
+
+                # Add to replay buffer
+                replay_buffer.push(sup_state_empty, sup_state_filled, sup_action, sup_reward, sup_next_empty, sup_next_filled, sup_done)
 
             # Training step
             if len(replay_buffer) >= args.batch_size:
@@ -299,6 +353,10 @@ def main():
                         help="Use heuristic normalized rewards (compares placement against all possibilities)")
     parser.add_argument('--death-penalty', type=float, default=0.0,
                         help="Penalty applied when agent dies (default: 0.0 for no penalty)")
+    parser.add_argument('--supervised-data', type=str, default=None,
+                        help="Path to supervised dataset (.pkl) for mixed replay buffer (optional)")
+    parser.add_argument('--supervised-prob', type=float, default=0.1,
+                        help="Probability of injecting a supervised transition per training step (default: 0.1)")
 
     args = parser.parse_args()
 
