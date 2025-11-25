@@ -92,11 +92,30 @@ def train_value_rl(args):
     if args.supervised_data:
         print(f"\nLoading supervised data from {args.supervised_data}...")
         with open(args.supervised_data, 'rb') as f:
-            supervised_transitions = pickle.load(f)
+            all_transitions = pickle.load(f)
 
         # Filter out HOLD actions
-        supervised_transitions = [t for t in supervised_transitions if t[2] != 6]
-        print(f"Loaded {len(supervised_transitions)} supervised transitions")
+        all_transitions = [t for t in all_transitions if t[2] != 6]
+
+        # Filter for only valuable transitions (piece locked or death)
+        print("Filtering for valuable transitions (piece placements and deaths)...")
+        for t in tqdm(all_transitions, desc="Filtering"):
+            done = t[6]
+            if done:
+                # Death transitions are valuable
+                supervised_transitions.append(t)
+            else:
+                # Check if piece locked by comparing board states
+                old_board = t[0]  # state_empty
+                new_board = t[4]  # next_empty
+                old_filled = np.sum(old_board > 0)
+                new_filled = np.sum(new_board > 0)
+
+                # If board gained blocks, piece locked
+                if new_filled > old_filled:
+                    supervised_transitions.append(t)
+
+        print(f"Filtered {len(all_transitions)} -> {len(supervised_transitions)} valuable transitions")
         print(f"Will inject with probability {args.supervised_prob:.2%} per training step")
 
     # Training loop
