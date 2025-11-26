@@ -360,7 +360,10 @@ def train_value_rl(args):
         # Monitor Q-value statistics every 50 episodes
         if episode % 50 == 0 and len(replay_buffer) >= args.batch_size:
             # Sample a batch to check Q-value magnitudes
-            sample_empty, sample_filled, _, _, _, _, _ = replay_buffer.sample(min(256, len(replay_buffer)))
+            sample_result = replay_buffer.sample(min(256, len(replay_buffer)))
+            # Handle both uniform (7 values) and PER (9 values) sampling
+            sample_empty = sample_result[0]
+            sample_filled = sample_result[1]
             sample_empty = torch.FloatTensor(sample_empty).unsqueeze(1).to(device)
             sample_filled = torch.FloatTensor(sample_filled).unsqueeze(1).to(device)
 
