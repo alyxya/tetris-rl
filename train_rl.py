@@ -21,6 +21,8 @@ from pufferlib.ocean.tetris import tetris
 from model import ValueNetwork
 from value_agent import ValueAgent
 from reward_utils import compute_lines_cleared, compute_simple_reward, compute_shaped_reward, compute_heuristic_normalized_reward
+from prioritized_replay_buffer import PrioritizedReplayBuffer
+from nstep_replay_buffer import NStepReplayBuffer, NStepPrioritizedReplayBuffer
 
 
 class ReplayBuffer:
@@ -85,7 +87,43 @@ def train_value_rl(args):
     target_net.eval()
 
     optimizer = optim.Adam(online_net.parameters(), lr=args.lr)
-    replay_buffer = ReplayBuffer(args.buffer_size)
+
+    # Select replay buffer based on configuration
+    buffer_type_desc = []
+    if args.n_step > 1:
+        buffer_type_desc.append(f"{args.n_step}-step")
+    if args.use_per:
+        buffer_type_desc.append("Prioritized")
+    else:
+        buffer_type_desc.append("Uniform")
+
+    if args.n_step > 1 and args.use_per:
+        replay_buffer = NStepPrioritizedReplayBuffer(
+            capacity=args.buffer_size,
+            n_step=args.n_step,
+            gamma=args.gamma,
+            alpha=args.per_alpha,
+            beta_start=args.per_beta_start,
+            beta_frames=args.per_beta_frames
+        )
+    elif args.n_step > 1:
+        replay_buffer = NStepReplayBuffer(
+            capacity=args.buffer_size,
+            n_step=args.n_step,
+            gamma=args.gamma
+        )
+    elif args.use_per:
+        replay_buffer = PrioritizedReplayBuffer(
+            capacity=args.buffer_size,
+            alpha=args.per_alpha,
+            beta_start=args.per_beta_start,
+            beta_frames=args.per_beta_frames
+        )
+    else:
+        replay_buffer = ReplayBuffer(args.buffer_size)
+
+    print(f"Replay Buffer: {' '.join(buffer_type_desc)} (size={args.buffer_size})")
+    print(f"Training Schedule: {args.grad_updates} gradient update(s) every {args.train_freq} steps, batch size {args.batch_size}")
 
     # Load supervised data if provided (for mixed replay buffer)
     supervised_transitions = []
@@ -247,39 +285,58 @@ def train_value_rl(args):
                 # Add to replay buffer
                 replay_buffer.push(sup_state_empty, sup_state_filled, sup_action, sup_reward, sup_next_empty, sup_next_filled, sup_done)
 
-            # Training step
-            if len(replay_buffer) >= args.batch_size:
-                # Sample batch
-                batch_empty, batch_filled, batch_actions, batch_rewards, batch_next_empty, batch_next_filled, batch_dones = replay_buffer.sample(args.batch_size)
+            # Training step - only train every train_freq steps
+            if steps % args.train_freq == 0 and len(replay_buffer) >= args.batch_size:
+                # Perform multiple gradient updates per training cycle
+                for _ in range(args.grad_updates):
+                    # Sample batch
+                    if args.use_per or (args.n_step > 1 and args.use_per):
+                        batch_empty, batch_filled, batch_actions, batch_rewards, batch_next_empty, batch_next_filled, batch_dones, indices, weights = replay_buffer.sample(args.batch_size)
+                        weights = torch.FloatTensor(weights).to(device)
+                    else:
+                        batch_empty, batch_filled, batch_actions, batch_rewards, batch_next_empty, batch_next_filled, batch_dones = replay_buffer.sample(args.batch_size)
+                        weights = torch.ones(args.batch_size).to(device)
 
-                # Convert to tensors
-                batch_empty = torch.FloatTensor(batch_empty).unsqueeze(1).to(device)
-                batch_filled = torch.FloatTensor(batch_filled).unsqueeze(1).to(device)
-                batch_actions = torch.LongTensor(batch_actions).to(device)
-                batch_rewards = torch.FloatTensor(batch_rewards).to(device)
-                batch_next_empty = torch.FloatTensor(batch_next_empty).unsqueeze(1).to(device)
-                batch_next_filled = torch.FloatTensor(batch_next_filled).unsqueeze(1).to(device)
-                batch_dones = torch.FloatTensor(batch_dones).to(device)
+                    # Convert to tensors
+                    batch_empty = torch.FloatTensor(batch_empty).unsqueeze(1).to(device)
+                    batch_filled = torch.FloatTensor(batch_filled).unsqueeze(1).to(device)
+                    batch_actions = torch.LongTensor(batch_actions).to(device)
+                    batch_rewards = torch.FloatTensor(batch_rewards).to(device)
+                    batch_next_empty = torch.FloatTensor(batch_next_empty).unsqueeze(1).to(device)
+                    batch_next_filled = torch.FloatTensor(batch_next_filled).unsqueeze(1).to(device)
+                    batch_dones = torch.FloatTensor(batch_dones).to(device)
 
-                # Compute Q-values
-                q_values = online_net(batch_empty, batch_filled)
-                q_pred = q_values.gather(1, batch_actions.unsqueeze(1)).squeeze(1)
+                    # Compute Q-values
+                    q_values = online_net(batch_empty, batch_filled)
+                    q_pred = q_values.gather(1, batch_actions.unsqueeze(1)).squeeze(1)
 
-                # Compute target Q-values
-                with torch.no_grad():
-                    next_q_values = target_net(batch_next_empty, batch_next_filled)
-                    next_q_max = next_q_values.max(1)[0]
-                    q_target = batch_rewards + args.gamma * next_q_max * (1 - batch_dones)
+                    # Compute target Q-values
+                    with torch.no_grad():
+                        next_q_values = target_net(batch_next_empty, batch_next_filled)
+                        next_q_max = next_q_values.max(1)[0]
+                        # Note: gamma is already applied in n-step returns if using n_step > 1
+                        if args.n_step > 1:
+                            q_target = batch_rewards + (args.gamma ** args.n_step) * next_q_max * (1 - batch_dones)
+                        else:
+                            q_target = batch_rewards + args.gamma * next_q_max * (1 - batch_dones)
 
-                # Compute loss (Huber loss is more robust to outliers than MSE)
-                loss = F.smooth_l1_loss(q_pred, q_target)
-                episode_losses.append(loss.item())
+                    # Compute TD-errors for PER priority updates
+                    td_errors = (q_pred - q_target).detach().cpu().numpy()
 
-                # Backward pass
-                optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(online_net.parameters(), args.grad_clip)
-                optimizer.step()
+                    # Compute weighted loss (importance sampling for PER)
+                    element_wise_loss = F.smooth_l1_loss(q_pred, q_target, reduction='none')
+                    loss = (element_wise_loss * weights).mean()
+                    episode_losses.append(loss.item())
+
+                    # Backward pass
+                    optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(online_net.parameters(), args.grad_clip)
+                    optimizer.step()
+
+                    # Update priorities in PER buffer
+                    if args.use_per or (args.n_step > 1 and args.use_per):
+                        replay_buffer.update_priorities(indices, td_errors)
 
         # Update target network
         if episode % args.target_update == 0:
@@ -376,6 +433,26 @@ def main():
                         help="Path to supervised dataset (.pkl) for mixed replay buffer (optional)")
     parser.add_argument('--supervised-prob', type=float, default=0.1,
                         help="Probability of injecting a supervised transition per training step (default: 0.1)")
+
+    # Prioritized Experience Replay args
+    parser.add_argument('--use-per', action='store_true',
+                        help="Use Prioritized Experience Replay instead of uniform sampling")
+    parser.add_argument('--per-alpha', type=float, default=0.6,
+                        help="PER: How much prioritization to use (0=uniform, 1=full priority)")
+    parser.add_argument('--per-beta-start', type=float, default=0.4,
+                        help="PER: Initial importance sampling weight (anneals to 1.0)")
+    parser.add_argument('--per-beta-frames', type=int, default=100000,
+                        help="PER: Number of frames to anneal beta from beta_start to 1.0")
+
+    # N-step returns args
+    parser.add_argument('--n-step', type=int, default=1,
+                        help="Number of steps for n-step returns (1=standard Q-learning, 3-5 recommended for Tetris)")
+
+    # Training schedule args
+    parser.add_argument('--train-freq', type=int, default=4,
+                        help="Train every N environment steps (default: 4)")
+    parser.add_argument('--grad-updates', type=int, default=1,
+                        help="Number of gradient updates per training cycle (default: 1)")
 
     args = parser.parse_args()
 
